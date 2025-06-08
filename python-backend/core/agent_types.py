@@ -11,45 +11,64 @@ from pydantic import BaseModel, Field
 
 
 class AgentType(Enum):
-    """Enumeration of all agent types in the system."""
+    """Enumeration of all agent types in the hierarchical system."""
     
-    # Tier 1: Orchestrator
-    ORCHESTRATOR = "orchestrator"
+    # Tier 1: Main Orchestrator
+    MAIN_FLUTTER_AGENT = "main_flutter_agent"
     
-    # Tier 2: Specialized Agents
-    ARCHITECTURE = "architecture"
-    IMPLEMENTATION = "implementation"
-    TESTING = "testing"
-    DEVOPS = "devops"
+    # Tier 2: Primary Specialized Agents
+    PROJECT_SETUP = "project_setup"
+    ARCHITECTURE = "architecture"  # Keep existing
     
-    # Additional Specialized Agents
-    SEARCH_FETCH = "search_fetch"
-    NAVIGATION_ROUTING = "navigation_routing"
-    ANIMATION_EFFECTS = "animation_effects"
-    LOCALIZATION = "localization"
-    ACCESSIBILITY = "accessibility"
+    # UI/UX Design Agents Group
+    UX_RESEARCH = "ux_research"
+    UI_IMPLEMENTATION = "ui_implementation"
+    UI_UX_AGENT = "ui_ux_agent"  # Combined UI/UX agent
+    
+    # State Management Agent
+    STATE_MANAGEMENT = "state_management"
+    
+    # Data Layer Agents Group
     DATA_MODEL = "data_model"
     LOCAL_STORAGE = "local_storage"
     API_INTEGRATION = "api_integration"
     REPOSITORY = "repository"
+    
+    # Business Logic Agent
     BUSINESS_LOGIC = "business_logic"
     
-    # Platform-Specific Deployment Agents
+    # Feature Agents
+    NAVIGATION_ROUTING = "navigation_routing"
+    ANIMATION_EFFECTS = "animation_effects"
+    
+    # Testing Agents Group (split existing TESTING)
+    UNIT_TEST = "unit_test"
+    WIDGET_TEST = "widget_test"
+    INTEGRATION_TEST = "integration_test"
+    
+    # Quality & Documentation Agents
+    LOCALIZATION = "localization"
+    ACCESSIBILITY = "accessibility"
+    CODE_QUALITY = "code_quality"
+    DOCUMENTATION = "documentation"
+    
+    # Deployment Agents Group (split existing DEVOPS)
     ANDROID_DEPLOYMENT = "android_deployment"
     IOS_DEPLOYMENT = "ios_deployment"
     WEB_DEPLOYMENT = "web_deployment"
     DESKTOP_DEPLOYMENT = "desktop_deployment"
     
-    # Quality and Documentation Agents
-    CODE_QUALITY = "code_quality"
-    DOCUMENTATION = "documentation"
-    SECURITY_ANALYSIS = "security_analysis"
+    # Utility Agents
     PERFORMANCE_MONITORING = "performance_monitoring"
+    SECURITY_ANALYSIS = "security_analysis"
     
-    # Advanced Agents
+    # Legacy Support (kept for backward compatibility)
+    ORCHESTRATOR = "orchestrator"  # Maps to MAIN_FLUTTER_AGENT
+    IMPLEMENTATION = "implementation"  # Generic implementation
+    TESTING = "testing"  # Generic testing
+    DEVOPS = "devops"  # Generic devops
+    SEARCH_FETCH = "search_fetch"
     MEMORY = "memory"
-    STATE_MANAGEMENT = "state_management"
-    UI_UX_IMPLEMENTATION = "ui_ux_implementation"
 
 
 class TaskStatus(Enum):
