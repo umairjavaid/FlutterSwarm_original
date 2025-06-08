@@ -1,0 +1,229 @@
+{
+  "name": "flutter-swarm",
+  "displayName": "Flutter Swarm - Multi-Agent Development Assistant",
+  "description": "AI-powered multi-agent system for Flutter development",
+  "version": "1.0.0",
+  "publisher": "flutterswarm",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other",
+    "AI",
+    "Extension Packs"
+  ],
+  "keywords": [
+    "flutter",
+    "ai",
+    "multi-agent",
+    "development",
+    "assistant",
+    "langraph"
+  ],
+  "activationEvents": [
+    "workspaceContains:pubspec.yaml",
+    "onLanguage:dart",
+    "onCommand:flutter-swarm.activate"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "flutter-swarm.activate",
+        "title": "Activate Flutter Swarm",
+        "category": "Flutter Swarm"
+      },
+      {
+        "command": "flutter-swarm.createProject",
+        "title": "Create New Flutter Project",
+        "category": "Flutter Swarm"
+      },
+      {
+        "command": "flutter-swarm.analyzeProject",
+        "title": "Analyze Current Project",
+        "category": "Flutter Swarm"
+      },
+      {
+        "command": "flutter-swarm.runAgent",
+        "title": "Run Specific Agent",
+        "category": "Flutter Swarm"
+      },
+      {
+        "command": "flutter-swarm.openDashboard",
+        "title": "Open Agent Dashboard",
+        "category": "Flutter Swarm"
+      },
+      {
+        "command": "flutter-swarm.showLogs",
+        "title": "Show Agent Logs",
+        "category": "Flutter Swarm"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "flutter-swarm.analyzeProject",
+          "when": "resourceExtname == .yaml && resourceFilename == pubspec.yaml",
+          "group": "flutter-swarm"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "flutter-swarm.activate",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "flutter-swarm.createProject",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "flutter-swarm.analyzeProject",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "flutter-swarm.runAgent",
+          "when": "flutter-swarm.active"
+        },
+        {
+          "command": "flutter-swarm.openDashboard",
+          "when": "flutter-swarm.active"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Flutter Swarm",
+      "properties": {
+        "flutter-swarm.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Path to Python executable for the backend service"
+        },
+        "flutter-swarm.backendPort": {
+          "type": "number",
+          "default": 8000,
+          "description": "Port for the Python backend service"
+        },
+        "flutter-swarm.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the backend service when a Flutter project is detected"
+        },
+        "flutter-swarm.logLevel": {
+          "type": "string",
+          "enum": [
+            "DEBUG",
+            "INFO",
+            "WARNING",
+            "ERROR"
+          ],
+          "default": "INFO",
+          "description": "Log level for the extension and backend service"
+        },
+        "flutter-swarm.agentConfiguration": {
+          "type": "object",
+          "description": "Configuration for individual agents",
+          "properties": {
+            "orchestrator": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "maxConcurrentTasks": {
+                  "type": "number",
+                  "default": 5
+                }
+              }
+            },
+            "architecture": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "enforceCleanArchitecture": {
+                  "type": "boolean",
+                  "default": true
+                }
+              }
+            },
+            "implementation": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "preferredStateManagement": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "bloc",
+                    "provider",
+                    "riverpod",
+                    "getx"
+                  ],
+                  "default": "auto"
+                }
+              }
+            },
+            "testing": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "generateGoldenTests": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "targetCoverage": {
+                  "type": "number",
+                  "default": 80
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "flutter-swarm-agents",
+          "name": "Flutter Swarm Agents",
+          "when": "flutter-swarm.active"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "flutter-swarm",
+          "title": "Flutter Swarm",
+          "icon": "$(robot)"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/uuid": "^10.0.0",
+    "@types/vscode": "^1.74.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^4.9.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "ws": "^8.14.0",
+    "uuid": "^9.0.0"
+  }
+}
