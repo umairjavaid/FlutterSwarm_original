@@ -122,7 +122,6 @@ CODING STANDARDS:
 - Use appropriate design patterns and architectural principles
 - Ensure responsive design for multiple screen sizes
 - Implement accessibility features and internationalization
-- Optimize performance and memory usage
 - Follow security best practices for data handling
 
 CODE GENERATION APPROACH:

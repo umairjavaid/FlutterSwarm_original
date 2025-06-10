@@ -24,7 +24,6 @@ class TaskType(Enum):
     CODE_REVIEW = "code_review"
     TESTING = "testing"
     SECURITY_AUDIT = "security_audit"
-    PERFORMANCE_OPTIMIZATION = "performance_optimization"
     DOCUMENTATION = "documentation"
     DEPLOYMENT = "deployment"
     REFACTORING = "refactoring"

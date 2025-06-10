@@ -3,16 +3,13 @@ Models package initialization.
 """
 from .agent_models import (
     AgentMessage,
-    TaskContext,
     TaskResult,
-    AgentCapability,
     MemoryEntry,
     TaskStatus,
-    MessageType,
-    AgentType
+    MessageType
 )
 from .task_models import (
-    Task,
+    TaskContext,
     Workflow,
     TaskDecomposition,
     ExecutionStrategy,
@@ -32,16 +29,13 @@ from .project_models import (
 __all__ = [
     # Agent models
     "AgentMessage",
-    "TaskContext", 
     "TaskResult",
-    "AgentCapability",
     "MemoryEntry",
     "TaskStatus",
     "MessageType",
-    "AgentType",
     
     # Task models
-    "Task",
+    "TaskContext",
     "Workflow",
     "TaskDecomposition",
     "ExecutionStrategy",

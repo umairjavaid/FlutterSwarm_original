@@ -114,7 +114,6 @@ DEVOPS RESPONSIBILITIES:
 5. Release Management: Implement versioning and release strategies
 6. Monitoring Setup: Configure application and infrastructure monitoring
 7. Security Implementation: Implement security best practices and compliance
-8. Performance Optimization: Optimize deployment and runtime performance
 
 PLATFORM EXPERTISE:
 - Mobile Deployment: App Store Connect, Google Play Console, Firebase App Distribution
@@ -153,7 +152,6 @@ Always provide production-ready, secure, and scalable solutions with comprehensi
             "security_automation",
             "container_orchestration",
             "cloud_platform_management",
-            "performance_optimization",
             "compliance_automation",
             "disaster_recovery_planning"
         ]

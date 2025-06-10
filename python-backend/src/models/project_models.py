@@ -86,7 +86,6 @@ class CodeMetrics:
     duplicate_code_percentage: float = 0.0
     technical_debt_ratio: float = 0.0
     code_smells: List[str] = field(default_factory=list)
-    performance_issues: List[str] = field(default_factory=list)
     security_vulnerabilities: List[str] = field(default_factory=list)
 
 
@@ -170,7 +169,6 @@ class ProjectAnalysis:
     project_context: ProjectContext
     architecture_assessment: Dict[str, Any] = field(default_factory=dict)
     security_assessment: Dict[str, Any] = field(default_factory=dict)
-    performance_assessment: Dict[str, Any] = field(default_factory=dict)
     quality_assessment: Dict[str, Any] = field(default_factory=dict)
     recommendations: List[str] = field(default_factory=list)
     risk_factors: List[str] = field(default_factory=list)

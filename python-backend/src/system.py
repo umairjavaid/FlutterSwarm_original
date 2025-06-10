@@ -19,7 +19,6 @@ from .agents.implementation_agent import ImplementationAgent
 from .agents.testing_agent import TestingAgent
 from .agents.devops_agent import DevOpsAgent
 from .agents.security_agent import SecurityAgent
-from .agents.performance_agent import PerformanceAgent
 from .agents.documentation_agent import DocumentationAgent
 from .config.settings import settings
 from .config import get_logger
@@ -197,12 +196,6 @@ class FlutterSwarmSystem:
                 "agent_id": "security_agent",
                 "agent_type": "security",
                 "description": "Security assessment and compliance agent"
-            },
-            {
-                "class": PerformanceAgent,
-                "agent_id": "performance_agent",
-                "agent_type": "performance", 
-                "description": "Performance analysis and optimization agent"
             },
             {
                 "class": DocumentationAgent,

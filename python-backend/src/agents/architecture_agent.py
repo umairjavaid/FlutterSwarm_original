@@ -106,7 +106,6 @@ ARCHITECTURAL RESPONSIBILITIES:
 4. Scalability Planning: Ensure architecture supports growth and maintenance
 5. Code Organization: Define module boundaries and separation of concerns
 6. Technical Debt Assessment: Identify and plan resolution of architectural issues
-7. Performance Architecture: Design for optimal performance across platforms
 8. Testing Strategy: Define comprehensive testing architecture
 
 ARCHITECTURAL PATTERNS EXPERTISE:
@@ -146,7 +145,6 @@ Always provide detailed rationale for architectural decisions and include specif
             "dependency_injection_setup",
             "module_organization",
             "scalability_planning",
-            "performance_architecture",
             "testing_architecture",
             "technical_debt_assessment",
             "migration_planning",

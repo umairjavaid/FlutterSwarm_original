@@ -198,7 +198,6 @@ class AgentCapabilityInfo:
     agent_type: str
     capabilities: List[str]
     specializations: List[str] = field(default_factory=list)
-    performance_metrics: Dict[str, float] = field(default_factory=dict)
     availability: bool = True
     max_concurrent_tasks: int = 5
     current_load: int = 0
@@ -211,7 +210,6 @@ class AgentCapabilityInfo:
             "agent_type": self.agent_type,
             "capabilities": self.capabilities,
             "specializations": self.specializations,
-            "performance_metrics": self.performance_metrics,
             "availability": self.availability,
             "max_concurrent_tasks": self.max_concurrent_tasks,
             "current_load": self.current_load,
@@ -226,7 +224,6 @@ class AgentCapabilityInfo:
             agent_type=data["agent_type"],
             capabilities=data["capabilities"],
             specializations=data.get("specializations", []),
-            performance_metrics=data.get("performance_metrics", {}),
             availability=data.get("availability", True),
             max_concurrent_tasks=data.get("max_concurrent_tasks", 5),
             current_load=data.get("current_load", 0),

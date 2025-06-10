@@ -54,7 +54,7 @@ class OrchestratorAgent(BaseAgent):
         self.active_workflows: Dict[str, WorkflowDefinition] = {}
         self.task_assignments: Dict[str, str] = {}  # task_id -> agent_id
         
-        # Performance tracking
+        # System tracking
         self.completion_stats: Dict[str, Any] = {
             "successful_workflows": 0,
             "failed_workflows": 0,
@@ -632,7 +632,6 @@ SPECIALIZED AGENTS AVAILABLE:
 - Testing Agent: Test creation, validation, quality assurance
 - DevOps Agent: Deployment, CI/CD, infrastructure
 - Security Agent: Security analysis, vulnerability assessment
-- Performance Agent: Optimization, monitoring, profiling
 - Documentation Agent: Documentation generation, API docs
 
 DECISION-MAKING PRINCIPLES:

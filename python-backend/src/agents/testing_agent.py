@@ -34,7 +34,6 @@ class TestingAgent(BaseAgent):
     - Integration test planning and execution
     - Test automation and CI/CD integration
     - Code coverage analysis and improvement
-    - Performance testing and benchmarking
     - Security testing and vulnerability assessment
     - Test strategy planning and best practices
     """

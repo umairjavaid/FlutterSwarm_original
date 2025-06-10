@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 from uuid import uuid4
 
-from models.agent_models import AgentMessage, CommunicationError
+from ..models.agent_models import AgentMessage, CommunicationError
 
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ class EventBus:
     - Topic-based subscriptions
     - Pattern matching for topic subscriptions
     - Message queuing and delivery guarantees
-    - Dead letter queue for failed deliveries
+    - Dead letter queue for failed message deliveries
     - Event auditing and logging
     - Health monitoring
     
@@ -73,7 +73,7 @@ class EventBus:
         message_queue: Queue for pending message deliveries
         dead_letter_queue: Queue for failed message deliveries
         event_history: History of recent events for debugging
-        metrics: Performance and health metrics
+        metrics: Health and delivery metrics
     """
     
     def __init__(self, max_history: int = 1000, max_retry_attempts: int = 3):

@@ -5,9 +5,9 @@ This module provides the abstract base class that all specialized agents inherit
 Every agent uses LLM calls for reasoning and decision-making, with no hardcoded logic.
 """
 
+import logging
 import asyncio
 import json
-import logging
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -15,10 +15,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from core.event_bus import EventBus
-from core.memory_manager import MemoryManager
-from models.agent_models import AgentMessage, AgentStatus, TaskResult
-from models.task_models import TaskContext
+from ..core.event_bus import EventBus
+from ..core.memory_manager import MemoryManager
+from ..models.agent_models import AgentMessage, AgentStatus, TaskResult
+from ..models.task_models import TaskContext
 
 
 logger = logging.getLogger(__name__)
@@ -31,9 +31,13 @@ class AgentCapability(Enum):
     TESTING = "testing"
     DEPLOYMENT = "deployment"
     SECURITY_ANALYSIS = "security_analysis"
-    PERFORMANCE_OPTIMIZATION = "performance_optimization"
     DOCUMENTATION = "documentation"
     ORCHESTRATION = "orchestration"
+    FILE_OPERATIONS = "file_operations"
+    VULNERABILITY_SCANNING = "vulnerability_scanning"
+    MONITORING = "monitoring"
+    INFRASTRUCTURE = "infrastructure"
+    QUALITY_ASSURANCE = "quality_assurance"
 
 
 @dataclass
@@ -296,7 +300,7 @@ Provide a detailed, actionable response with clear reasoning and specific implem
         Raises:
             AgentError: If task processing fails
         """
-        from models.agent_models import AgentError
+        from ..models.agent_models import AgentError
         
         task_id = task_context.task_id
         correlation_id = task_context.correlation_id
@@ -304,151 +308,103 @@ Provide a detailed, actionable response with clear reasoning and specific implem
         try:
             self.logger.info(f"Starting task processing: {task_id}")
             self.status = AgentStatus.PROCESSING
+            
+            # Add task to active tasks
             self.active_tasks[task_id] = task_context
             self.last_activity = datetime.utcnow()
             
-            # Notify start of processing
-            await self.event_bus.publish(
-                "task.started",
-                AgentMessage(
-                    type="task_started",
-                    source=self.agent_id,
-                    target="orchestrator",
-                    payload={"task_id": task_id, "agent_id": self.agent_id},
-                    correlation_id=correlation_id
-                )
-            )
-            
-            # Use LLM to analyze and process the task
+            # Execute LLM-based task analysis
             analysis_result = await self.execute_llm_task(
-                user_prompt=f"""
-                Analyze and process this task:
-                
-                Task Description: {task_context.description}
-                Task Type: {task_context.task_type}
-                Requirements: {json.dumps(task_context.requirements, indent=2)}
-                Expected Deliverables: {task_context.expected_deliverables}
-                
-                Please provide a comprehensive analysis and execution plan.
-                """,
+                user_prompt=f"Analyze and process this task: {task_context.description}",
                 context={
                     "task": task_context.to_dict(),
-                    "project": task_context.project_context,
-                    "agent_capabilities": [cap.value for cap in self.capabilities]
+                    "requirements": task_context.requirements,
+                    "expected_deliverables": task_context.expected_deliverables
                 },
                 structured_output=True
             )
             
-            # Execute agent-specific processing
-            result = await self._execute_specialized_processing(task_context, analysis_result)
+            # Execute specialized processing if implemented
+            specialized_result = {}
+            if hasattr(self, '_execute_specialized_processing'):
+                specialized_result = await self._execute_specialized_processing(
+                    task_context, analysis_result
+                )
             
             # Create task result
             task_result = TaskResult(
                 task_id=task_id,
                 agent_id=self.agent_id,
                 status="completed",
-                result=result,
-                deliverables=result.get("deliverables", {}),
+                result=analysis_result.get("result", "Task completed successfully"),
+                deliverables={
+                    "analysis": analysis_result,
+                    "specialized_output": specialized_result
+                },
                 metadata={
-                    "processing_time": (datetime.utcnow() - task_context.created_at).total_seconds(),
-                    "llm_analysis": analysis_result,
-                    "agent_type": self.agent_type
+                    "agent_type": self.agent_type,
+                    "capabilities_used": [cap.value for cap in self.capabilities],
+                    "processing_time": (datetime.utcnow() - task_context.created_at).total_seconds()
                 },
                 correlation_id=correlation_id
             )
             
-            # Notify completion
-            await self.event_bus.publish(
-                "task.completed",
-                AgentMessage(
-                    type="task_completed",
-                    source=self.agent_id,
-                    target="orchestrator",
-                    payload=task_result.to_dict(),
-                    correlation_id=correlation_id
-                )
+            # Store task result in memory
+            await self.memory_manager.store_memory(
+                content=f"Task completed: {task_result.result}",
+                metadata={
+                    "type": "task_result",
+                    "task_id": task_id,
+                    "status": task_result.status
+                },
+                correlation_id=correlation_id,
+                importance=0.8
             )
             
-            self.logger.info(f"Task completed successfully: {task_id}")
+            self.status = AgentStatus.IDLE
             return task_result
             
         except Exception as e:
-            self.logger.error(f"Task processing failed: {task_id}, error: {e}")
+            self.logger.error(f"Task processing failed for {task_id}: {e}")
             
             # Create error result
             error_result = TaskResult(
                 task_id=task_id,
                 agent_id=self.agent_id,
-                status="error",
-                result={"error": str(e)},
+                status="failed",
                 error=str(e),
                 correlation_id=correlation_id
             )
             
-            # Notify failure
-            await self.event_bus.publish(
-                "task.failed",
-                AgentMessage(
-                    type="task_failed",
-                    source=self.agent_id,
-                    target="orchestrator",
-                    payload=error_result.to_dict(),
-                    correlation_id=correlation_id
-                )
-            )
-            
+            self.status = AgentStatus.IDLE
             return error_result
             
         finally:
-            self.active_tasks.pop(task_id, None)
-            self.status = AgentStatus.IDLE if not self.active_tasks else AgentStatus.PROCESSING
-    
-    @abstractmethod
-    async def _execute_specialized_processing(
-        self,
-        task_context: TaskContext,
-        llm_analysis: Dict[str, Any]
-    ) -> Dict[str, Any]:
+            # Remove from active tasks
+            if task_id in self.active_tasks:
+                del self.active_tasks[task_id]
+
+    async def health_check(self) -> bool:
         """
-        Execute agent-specific processing logic.
-        
-        This method must be implemented by each specialized agent to handle
-        their domain-specific tasks using the LLM analysis as guidance.
-        
-        Args:
-            task_context: Complete task context
-            llm_analysis: Analysis and plan from the LLM
+        Perform a health check on the agent.
         
         Returns:
-            Dictionary containing the processing results and deliverables
+            True if agent is healthy, False otherwise
         """
-        pass
-    
-    async def _handle_task_assignment(self, message: AgentMessage) -> None:
-        """Handle task assignment from orchestrator."""
         try:
-            task_data = message.payload
-            task_context = TaskContext.from_dict(task_data)
+            # Test LLM connectivity
+            test_response = await self.execute_llm_task(
+                user_prompt="Respond with 'OK' if you can process this message.",
+                context={},
+                max_retries=1
+            )
             
-            # Process task asynchronously
-            asyncio.create_task(self.process_task(task_context))
+            return "OK" in test_response.upper()
             
         except Exception as e:
-            self.logger.error(f"Failed to handle task assignment: {e}")
-    
-    async def _handle_shutdown(self, message: AgentMessage) -> None:
-        """Handle shutdown signal."""
-        self.logger.info(f"Received shutdown signal for agent {self.agent_id}")
-        self.status = AgentStatus.SHUTTING_DOWN
-        
-        # Cancel active tasks
-        for task_id in list(self.active_tasks.keys()):
-            self.logger.info(f"Cancelling active task: {task_id}")
-            self.active_tasks.pop(task_id, None)
-        
-        self.status = AgentStatus.OFFLINE
-        self.logger.info(f"Agent {self.agent_id} shutdown complete")
-    
+            self.logger.error(f"Health check failed: {e}")
+            return False
+
     async def get_status(self) -> Dict[str, Any]:
         """Get current agent status and metrics."""
         return {
@@ -457,33 +413,28 @@ Provide a detailed, actionable response with clear reasoning and specific implem
             "status": self.status.value,
             "capabilities": [cap.value for cap in self.capabilities],
             "active_tasks": len(self.active_tasks),
+            "max_concurrent_tasks": self.config.max_concurrent_tasks,
             "created_at": self.created_at.isoformat(),
             "last_activity": self.last_activity.isoformat(),
-            "config": {
-                "max_concurrent_tasks": self.config.max_concurrent_tasks,
-                "llm_model": self.config.llm_model
-            }
+            "uptime": (datetime.utcnow() - self.created_at).total_seconds()
         }
-    
-    async def health_check(self) -> bool:
-        """Perform health check on agent components."""
+
+    async def _handle_task_assignment(self, message: AgentMessage) -> None:
+        """Handle task assignment events."""
         try:
-            # Check LLM client
-            test_response = await self.llm_client.generate(
-                "Health check test",
-                model=self.config.llm_model,
-                max_tokens=10,
-                timeout=5
-            )
-            
-            # Check memory manager
-            await self.memory_manager.health_check()
-            
-            # Check event bus
-            await self.event_bus.health_check()
-            
-            return True
-            
+            task_data = message.payload
+            if "task_context" in task_data:
+                task_context = TaskContext.from_dict(task_data["task_context"])
+                await self.process_task(task_context)
         except Exception as e:
-            self.logger.error(f"Health check failed: {e}")
-            return False
+            self.logger.error(f"Failed to handle task assignment: {e}")
+
+    async def _handle_shutdown(self, message: AgentMessage) -> None:
+        """Handle shutdown events."""
+        self.logger.info(f"Agent {self.agent_id} received shutdown signal")
+        self.status = AgentStatus.OFFLINE
+        
+        # Cancel active tasks gracefully
+        for task_id in list(self.active_tasks.keys()):
+            self.logger.info(f"Cancelling active task: {task_id}")
+            del self.active_tasks[task_id]
