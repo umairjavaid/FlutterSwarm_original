@@ -326,36 +326,74 @@ class SupervisorAgent:
         logger.info("Execution monitor node: Monitoring task progress")
         
         active_tasks = state.get("active_tasks", {})
+        completed_tasks = state.get("completed_tasks", {})
         
-        # Simulate task progress checking
-        # In real implementation, this would check actual agent status
-        progress_updates = []
+        # Simulate task execution and completion
+        newly_completed = {}
+        remaining_active = {}
+        
         for task_id, task_info in active_tasks.items():
-            # Check if task should be completed (simplified logic)
-            if task_info.get("status") == "assigned":
-                progress_updates.append({
-                    "task_id": task_id,
+            current_status = task_info.get("status", "assigned")
+            
+            # Simulate task progression: assigned -> in_progress -> completed
+            if current_status == "assigned":
+                # Mark as in progress
+                remaining_active[task_id] = {
+                    **task_info,
                     "status": "in_progress",
                     "progress": 0.5,
                     "updated_at": datetime.utcnow().isoformat()
-                })
+                }
+            elif current_status == "in_progress":
+                # Mark as completed
+                newly_completed[task_id] = {
+                    **task_info,
+                    "status": "completed",
+                    "progress": 1.0,
+                    "completed_at": datetime.utcnow().isoformat(),
+                    "result": {
+                        "status": "success",
+                        "summary": f"Successfully completed {task_info.get('description', 'Flutter app task')}"
+                    },
+                    "deliverables": {
+                        "flutter_app": {
+                            "pubspec.yaml": self._generate_pubspec_yaml(),
+                            "main.dart": self._generate_main_dart(),
+                            "lib/button_app.dart": self._generate_button_app_dart()
+                        }
+                    }
+                }
+            else:
+                # Keep as is
+                remaining_active[task_id] = task_info
+        
+        # Update completed tasks
+        all_completed = {**completed_tasks, **newly_completed}
         
         # Update state
         new_messages = list(state.get("messages", []))
         new_messages.append(create_agent_message(
             self.agent_id,
-            f"Monitoring {len(active_tasks)} active tasks",
+            f"Monitoring {len(remaining_active)} active tasks, {len(newly_completed)} newly completed",
             MessageType.STATUS_UPDATE,
-            {"progress_updates": progress_updates}
+            {
+                "active_count": len(remaining_active),
+                "completed_count": len(all_completed),
+                "newly_completed": list(newly_completed.keys())
+            }
         ))
         
         return {
             **state,
             "messages": new_messages,
+            "active_tasks": remaining_active,
+            "completed_tasks": all_completed,
+            "next_action": "aggregate" if newly_completed and not remaining_active else "continue",
             "execution_metrics": {
                 **state.get("execution_metrics", {}),
                 "last_monitor_check": datetime.utcnow().isoformat(),
-                "active_task_count": len(active_tasks)
+                "active_task_count": len(remaining_active),
+                "completed_task_count": len(all_completed)
             }
         }
     
@@ -450,13 +488,29 @@ class SupervisorAgent:
         """Route based on monitoring results."""
         active_tasks = state.get("active_tasks", {})
         completed_tasks = state.get("completed_tasks", {})
+        pending_tasks = state.get("pending_tasks", [])
+        
+        # Check if we have made progress on tasks
+        workflow_metadata = state.get("workflow_metadata", {})
+        monitor_count = workflow_metadata.get("monitor_iterations", 0)
+        
+        # If we've monitored too many times without progress, move to aggregation
+        if monitor_count > 5:
+            return "aggregate"
+        
+        # Update monitor count
+        workflow_metadata["monitor_iterations"] = monitor_count + 1
+        state["workflow_metadata"] = workflow_metadata
         
         if active_tasks:
-            return "continue"
+            # Continue monitoring only if tasks are actually progressing
+            return "continue" if monitor_count < 3 else "aggregate"
         elif completed_tasks:
             return "aggregate"
-        else:
+        elif pending_tasks:
             return "supervisor"
+        else:
+            return "aggregate"
     
     def _aggregation_router(self, state: WorkflowState) -> str:
         """Route after result aggregation."""
@@ -649,7 +703,8 @@ class SupervisorAgent:
         config = {
             "configurable": {
                 "thread_id": thread_id
-            }
+            },
+            "recursion_limit": 50  # Increase recursion limit
         }
         
         try:
@@ -707,20 +762,128 @@ class SupervisorAgent:
             "performance": ["performance_analysis", "optimization", "monitoring"]
         }
         return capabilities_map.get(agent_role, ["general_purpose"])
-
-
-class MockAgent:
-    """Mock agent for CLI compatibility."""
     
-    def __init__(self, agent_type: str, capabilities: List[str]):
-        self.agent_type = agent_type
-        self.capabilities = capabilities
-    
-    async def get_status(self) -> Dict[str, Any]:
-        """Get agent status."""
-        return {
-            "agent_type": self.agent_type,
-            "status": "available",
-            "capabilities": self.capabilities,
-            "active_tasks": 0
-        }
+    def _generate_pubspec_yaml(self) -> str:
+        """Generate a basic Flutter pubspec.yaml file."""
+        return """name: simple_button_app
+description: A simple Flutter app with two buttons
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
+"""
+
+    def _generate_main_dart(self) -> str:
+        """Generate the main.dart file for the Flutter app."""
+        return """import 'package:flutter/material.dart';
+import 'button_app.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Simple Button App',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
+      ),
+      home: const ButtonApp(),
+    );
+  }
+}
+"""
+
+    def _generate_button_app_dart(self) -> str:
+        """Generate the button app widget."""
+        return """import 'package:flutter/material.dart';
+
+class ButtonApp extends StatefulWidget {
+  const ButtonApp({super.key});
+
+  @override
+  State<ButtonApp> createState() => _ButtonAppState();
+}
+
+class _ButtonAppState extends State<ButtonApp> {
+  String _message = 'Press a button!';
+
+  void _onButton1Pressed() {
+    setState(() {
+      _message = 'Button 1 pressed';
+    });
+  }
+
+  void _onButton2Pressed() {
+    setState(() {
+      _message = 'Button 2 pressed';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: const Text('Simple Button App'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Text(
+              _message,
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 40),
+            ElevatedButton(
+              onPressed: _onButton1Pressed,
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(200, 50),
+              ),
+              child: const Text(
+                'Button 1',
+                style: TextStyle(fontSize: 18),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _onButton2Pressed,
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(200, 50),
+              ),
+              child: const Text(
+                'Button 2',
+                style: TextStyle(fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+"""
