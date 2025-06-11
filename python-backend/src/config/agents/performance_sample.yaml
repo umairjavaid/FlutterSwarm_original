@@ -1,0 +1,16 @@
+behavior_config:
+  max_concurrent_tasks: 3
+capabilities:
+- performance_analysis
+- optimization
+- monitoring_setup
+enabled: true
+model_config:
+  max_retries: 3
+  max_tokens: 7000
+  model: claude-3-5-sonnet-20240620
+  provider: anthropic
+  temperature: 0.3
+  timeout: 700
+prompt_config:
+  system_prompt_file: performance_prompt.txt

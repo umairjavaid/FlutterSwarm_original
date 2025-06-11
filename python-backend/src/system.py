@@ -106,3 +106,35 @@ def get_langgraph_system() -> Any:
     """Get the LangGraph system instance."""
     # This would return a cached instance in a real implementation
     return None
+
+
+# System management functions for CLI compatibility
+_system_instance = None
+
+
+async def initialize_system(**kwargs) -> Any:
+    """Initialize the system (alias for initialize_langgraph_system)."""
+    global _system_instance
+    _system_instance = await initialize_langgraph_system(**kwargs)
+    return _system_instance
+
+
+async def start_system(**kwargs) -> Any:
+    """Start the system."""
+    if _system_instance is None:
+        await initialize_system(**kwargs)
+    return _system_instance
+
+
+async def stop_system():
+    """Stop the system."""
+    global _system_instance
+    if _system_instance:
+        # Add cleanup logic here if needed
+        _system_instance = None
+    logger.info("System stopped")
+
+
+def get_system() -> Any:
+    """Get the current system instance."""
+    return _system_instance

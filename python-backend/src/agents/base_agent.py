@@ -135,8 +135,14 @@ class BaseAgent(ABC):
         Returns:
             Comprehensive system prompt string for LLM initialization
         """
+        from ..config.agent_configs import agent_config_manager
+        
         config_prompt = agent_config_manager.get_system_prompt(self.agent_type)
-        return config_prompt if config_prompt else await self._get_default_system_prompt()
+        if config_prompt:
+            return config_prompt
+        else:
+            # Fallback to default if no configuration found
+            return await self._get_default_system_prompt()
     
     @abstractmethod
     async def _get_default_system_prompt(self) -> str:
@@ -176,8 +182,13 @@ class BaseAgent(ABC):
         Returns:
             LLM response as string or parsed JSON dictionary
         """
+        from ..config.agent_configs import agent_config_manager
+        
+        # Get agent configuration
+        agent_config = agent_config_manager.get_agent_config(self.agent_type)
+        
         if max_retries is None:
-            max_retries = self.agent_config.model_config.max_retries if self.agent_config else 3
+            max_retries = agent_config.model_config.max_retries if agent_config else 3
         
         system_prompt = await self.get_system_prompt()
         memory_context = await self.memory_manager.get_relevant_context(
@@ -190,7 +201,8 @@ class BaseAgent(ABC):
             user_prompt=user_prompt,
             context=context,
             memory_context=memory_context,
-            structured_output=structured_output
+            structured_output=structured_output,
+            agent_config=agent_config
         )
         
         for attempt in range(max_retries):
@@ -198,11 +210,11 @@ class BaseAgent(ABC):
                 self.logger.debug(f"LLM execution attempt {attempt + 1}/{max_retries}")
                 
                 # Use configuration for model parameters
-                model = self.agent_config.model_config.model if self.agent_config else self.config.llm_model
-                temperature = self.agent_config.model_config.temperature if self.agent_config else self.config.temperature
-                max_tokens = self.agent_config.model_config.max_tokens if self.agent_config else self.config.max_tokens
-                timeout = self.agent_config.model_config.timeout if self.agent_config else self.config.timeout
-                provider = self.agent_config.model_config.provider if self.agent_config else None
+                model = agent_config.model_config.model if agent_config else self.config.llm_model
+                temperature = agent_config.model_config.temperature if agent_config else self.config.temperature
+                max_tokens = agent_config.model_config.max_tokens if agent_config else self.config.max_tokens
+                timeout = agent_config.model_config.timeout if agent_config else self.config.timeout
+                provider = agent_config.model_config.provider if agent_config else None
                 
                 response = await self.llm_client.generate(
                     prompt=full_prompt,
@@ -239,16 +251,16 @@ class BaseAgent(ABC):
                 self.logger.error(f"LLM execution failed (attempt {attempt + 1}): {e}")
                 
                 # Try fallback provider if configured
-                if (attempt == 0 and self.agent_config and 
-                    self.agent_config.model_config.fallback_provider):
+                if (attempt == 0 and agent_config and 
+                    agent_config.model_config.fallback_provider):
                     try:
                         fallback_response = await self.llm_client.generate(
                             prompt=full_prompt,
-                            model=self.agent_config.model_config.fallback_model or model,
+                            model=agent_config.model_config.fallback_model or model,
                             temperature=temperature,
                             max_tokens=max_tokens,
                             timeout=timeout,
-                            provider=self.agent_config.model_config.fallback_provider,
+                            provider=agent_config.model_config.fallback_provider,
                             agent_id=self.agent_id,
                             correlation_id=context.get('correlation_id', '')
                         )
@@ -276,11 +288,29 @@ class BaseAgent(ABC):
         user_prompt: str,
         context: Dict[str, Any],
         memory_context: str,
-        structured_output: bool = False
+        structured_output: bool = False,
+        agent_config: Optional[Any] = None
     ) -> str:
         """Construct a comprehensive prompt with all necessary context."""
+        # Add custom instructions from configuration
+        custom_instructions = ""
+        constraint_instructions = ""
+        response_format_instructions = ""
+        
+        if agent_config and agent_config.prompt_config:
+            if agent_config.prompt_config.custom_instructions:
+                custom_instructions = "\n\nCUSTOM INSTRUCTIONS:\n" + \
+                    "\n".join(f"- {instruction}" for instruction in agent_config.prompt_config.custom_instructions)
+            
+            if agent_config.prompt_config.constraint_instructions:
+                constraint_instructions = "\n\nCONSTRAINT INSTRUCTIONS:\n" + \
+                    "\n".join(f"- {instruction}" for instruction in agent_config.prompt_config.constraint_instructions)
+            
+            if agent_config.prompt_config.response_format_instructions:
+                response_format_instructions = f"\n\nRESPONSE FORMAT:\n{agent_config.prompt_config.response_format_instructions}"
+        
         output_format = ""
-        if structured_output:
+        if structured_output and not response_format_instructions:
             output_format = """
             
 RESPONSE FORMAT:
@@ -308,18 +338,12 @@ PROJECT CONTEXT:
 
 MEMORY CONTEXT:
 {memory_context}
-
-TASK CONSTRAINTS:
-- Follow Flutter/Dart best practices
-- Ensure code is production-ready and well-documented
-- Include comprehensive error handling
-- Consider performance and scalability
-- Follow established project patterns and conventions
-- Maintain security best practices
+{custom_instructions}
+{constraint_instructions}
 
 CURRENT TASK:
 {user_prompt}
-{output_format}
+{response_format_instructions or output_format}
 
 Provide a detailed, actionable response with clear reasoning and specific implementation guidance."""
     

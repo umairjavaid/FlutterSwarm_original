@@ -1,31 +1,62 @@
+enabled: true
+
+model_config:
+  provider: anthropic
+  model: claude-3-5-sonnet-20240620
+  temperature: 0.2
+  max_tokens: 7000
+  timeout: 800
+  max_retries: 3
+  fallback_provider: null
+  fallback_model: null
+
+prompt_config:
+  system_prompt_file: security_prompt.txt
+  custom_instructions:
+    - Always provide actionable security recommendations
+    - Include implementation details and compliance guidance
+    - Consider OWASP Mobile Top 10 vulnerabilities
+    - Assess platform-specific security requirements
+  constraint_instructions:
+    - Follow security best practices
+    - Ensure compliance with privacy regulations
+    - Implement defense-in-depth strategies
+    - Consider zero-trust architecture principles
+  response_format_instructions: Provide structured security analysis with risk ratings and remediation steps
+
 behavior_config:
+  max_concurrent_tasks: 3
+  task_timeout: 800
   auto_retry_failed_tasks: true
   enable_collaboration: true
   enable_learning: true
-  importance_threshold: 0.5
-  max_concurrent_tasks: 5
-  memory_retention_hours: 24
-  task_timeout: 600
+  memory_retention_hours: 48
+  importance_threshold: 0.8
+
+capabilities:
+  - security_analysis
+  - vulnerability_assessment
+  - threat_modeling
+  - compliance_checking
+  - penetration_testing
+  - security_code_review
+
+specializations:
+  - mobile_security
+  - owasp_mobile_top_10
+  - data_protection
+  - authentication_security
+  - api_security
+
 custom_parameters:
-  custom_threshold: 0.8
-  debug_mode: false
-  specialized_feature_enabled: true
-enabled: true
-model_config:
-  max_retries: 3
-  max_tokens: 4000
-  model: claude-3-5-sonnet-20240620
-  provider: anthropic
-  temperature: 0.7
-  timeout: 300
-prompt_config:
-  constraint_instructions:
-  - Follow Flutter best practices
-  - Ensure accessibility compliance
-  - Maintain security standards
-  custom_instructions:
-  - Always provide detailed explanations
-  - Include code examples when relevant
-  - Consider performance implications
-  response_format_instructions: Provide responses in JSON format when requested
-  system_prompt_file: custom_prompt.txt
+  security_frameworks:
+    - owasp_mobile
+    - nist_cybersecurity
+    - iso_27001
+  compliance_standards:
+    - gdpr
+    - ccpa
+    - hipaa
+    - pci_dss
+  scan_depth: comprehensive
+  include_false_positives: false

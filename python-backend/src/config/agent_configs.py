@@ -3,10 +3,11 @@ LangGraph Agent Configuration Management System.
 
 This module provides flexible configuration for LangGraph agents in the FlutterSwarm system.
 """
+import os
+import yaml
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from pathlib import Path
-import os
 
 from .settings import settings
 
@@ -20,18 +21,40 @@ class LangGraphAgentModelConfig:
     max_tokens: int = 4000
     timeout: int = 300
     max_retries: int = 3
+    fallback_provider: Optional[str] = None
+    fallback_model: Optional[str] = None
+
+
+@dataclass
+class LangGraphAgentPromptConfig:
+    """Configuration for agent prompts and instructions."""
+    system_prompt_file: Optional[str] = None
+    system_prompt_template: Optional[str] = None
+    custom_instructions: List[str] = field(default_factory=list)
+    constraint_instructions: List[str] = field(default_factory=list)
+    response_format_instructions: Optional[str] = None
+
+
+@dataclass
+class LangGraphAgentBehaviorConfig:
+    """Configuration for agent behavior and operational parameters."""
+    max_concurrent_tasks: int = 5
+    task_timeout: int = 600
+    auto_retry_failed_tasks: bool = True
+    enable_collaboration: bool = True
+    enable_learning: bool = True
+    memory_retention_hours: int = 24
+    importance_threshold: float = 0.5
 
 
 @dataclass
 class LangGraphAgentConfig:
-    """Configuration for LangGraph agents."""
+    """Complete configuration for LangGraph agents."""
     agent_type: str
     enabled: bool = True
     model_config: LangGraphAgentModelConfig = field(default_factory=LangGraphAgentModelConfig)
-    system_prompt_file: Optional[str] = None
-    system_prompt_template: Optional[str] = None
-    custom_instructions: List[str] = field(default_factory=list)
-    max_concurrent_tasks: int = 5
+    prompt_config: LangGraphAgentPromptConfig = field(default_factory=LangGraphAgentPromptConfig)
+    behavior_config: LangGraphAgentBehaviorConfig = field(default_factory=LangGraphAgentBehaviorConfig)
     capabilities: List[str] = field(default_factory=list)
     specializations: List[str] = field(default_factory=list)
     custom_parameters: Dict[str, Any] = field(default_factory=dict)
@@ -41,8 +64,12 @@ class LangGraphAgentConfigManager:
     """Manages configuration for LangGraph agents."""
     
     def __init__(self, config_dir: Optional[str] = None):
-        self.config_dir = Path(config_dir or os.path.join(os.path.dirname(__file__), "langgraph_agents"))
+        self.config_dir = Path(config_dir or os.path.join(os.path.dirname(__file__), "agents"))
         self.config_dir.mkdir(exist_ok=True)
+        
+        # Prompts directory
+        self.prompts_dir = self.config_dir / "prompts"
+        self.prompts_dir.mkdir(exist_ok=True)
         
         self._agent_configs: Dict[str, LangGraphAgentConfig] = {}
         self._prompt_cache: Dict[str, str] = {}
@@ -52,101 +79,139 @@ class LangGraphAgentConfigManager:
     
     def _load_default_configs(self):
         """Load default configurations for LangGraph agents."""
-        default_configs = {
-            "supervisor": LangGraphAgentConfig(
-                agent_type="supervisor",
-                model_config=LangGraphAgentModelConfig(
-                    provider="anthropic",
-                    model="claude-3-5-sonnet-20240620",
-                    temperature=0.3,
-                    max_tokens=6000,
-                    timeout=600
-                ),
-                system_prompt_file="supervisor_prompt.txt",
-                capabilities=["workflow_orchestration", "task_decomposition", "agent_coordination"],
-                specializations=["flutter_development", "multi_agent_coordination"]
-            ),
-            "architecture": LangGraphAgentConfig(
-                agent_type="architecture",
-                model_config=LangGraphAgentModelConfig(
-                    provider="anthropic",
-                    model="claude-3-5-sonnet-20240620",
-                    temperature=0.3,
-                    max_tokens=6000,
-                    timeout=600
-                ),
-                system_prompt_file="architecture_prompt.txt",
-                capabilities=["architecture_analysis", "system_design", "pattern_selection"],
-                specializations=["flutter_architecture", "clean_architecture", "state_management"]
-            ),
-            "implementation": LangGraphAgentConfig(
-                agent_type="implementation",
-                model_config=LangGraphAgentModelConfig(
-                    provider="anthropic",
-                    model="claude-3-5-sonnet-20240620",
-                    temperature=0.2,
-                    max_tokens=8000,
-                    timeout=900
-                ),
-                system_prompt_file="implementation_prompt.txt",
-                capabilities=["code_generation", "feature_implementation", "ui_development"],
-                specializations=["flutter_widgets", "dart_programming", "state_management"]
-            ),
-            "testing": LangGraphAgentConfig(
-                agent_type="testing",
-                model_config=LangGraphAgentModelConfig(
-                    provider="openai",
-                    model="gpt-4",
-                    temperature=0.3,
-                    max_tokens=6000,
-                    timeout=600
-                ),
-                system_prompt_file="testing_prompt.txt",
-                capabilities=["test_generation", "quality_assurance", "test_automation"],
-                specializations=["flutter_testing", "unit_testing", "widget_testing"]
-            ),
-            "security": LangGraphAgentConfig(
-                agent_type="security",
-                model_config=LangGraphAgentModelConfig(
-                    provider="openai",
-                    model="gpt-4",
-                    temperature=0.2,
-                    max_tokens=7000,
-                    timeout=800
-                ),
-                system_prompt_file="security_prompt.txt",
-                capabilities=["security_analysis", "vulnerability_scanning", "compliance_check"],
-                specializations=["mobile_security", "flutter_security", "privacy_compliance"]
-            ),
-            "devops": LangGraphAgentConfig(
-                agent_type="devops",
-                model_config=LangGraphAgentModelConfig(
-                    provider="openai",
-                    model="gpt-4",
-                    temperature=0.3,
-                    max_tokens=7000,
-                    timeout=900
-                ),
-                system_prompt_file="devops_prompt.txt",
-                capabilities=["deployment", "ci_cd_setup", "infrastructure_management"],
-                specializations=["flutter_deployment", "mobile_deployment", "cloud_deployment"]
-            ),
-            "documentation": LangGraphAgentConfig(
-                agent_type="documentation",
-                model_config=LangGraphAgentModelConfig(
-                    provider="openai",
-                    model="gpt-4",
-                    temperature=0.4,
-                    max_tokens=8000,
-                    timeout=600
-                ),
-                system_prompt_file="documentation_prompt.txt",
-                capabilities=["documentation_generation", "api_docs", "user_guides"],
-                specializations=["flutter_documentation", "dart_docs", "technical_writing"]
-            )
+        # Load configurations from YAML files
+        config_files = list(self.config_dir.glob("*_sample.yaml"))
+        
+        for config_file in config_files:
+            try:
+                agent_type = config_file.stem.replace("_sample", "")
+                with open(config_file, 'r') as f:
+                    config_data = yaml.safe_load(f)
+                
+                config = self._create_config_from_dict(agent_type, config_data)
+                self._agent_configs[agent_type] = config
+                
+            except Exception as e:
+                print(f"Warning: Failed to load config from {config_file}: {e}")
+        
+        # Create default configs for standard agent types if not found
+        default_agent_types = [
+            "orchestrator", "architecture", "implementation", "testing", 
+            "security", "devops", "documentation", "performance"
+        ]
+        
+        for agent_type in default_agent_types:
+            if agent_type not in self._agent_configs:
+                self._agent_configs[agent_type] = self._create_default_config(agent_type)
+    
+    def _create_config_from_dict(self, agent_type: str, config_data: Dict[str, Any]) -> LangGraphAgentConfig:
+        """Create agent config from dictionary data."""
+        model_config_data = config_data.get("model_config", {})
+        model_config = LangGraphAgentModelConfig(
+            provider=model_config_data.get("provider", "anthropic"),
+            model=model_config_data.get("model", "claude-3-5-sonnet-20240620"),
+            temperature=model_config_data.get("temperature", 0.7),
+            max_tokens=model_config_data.get("max_tokens", 4000),
+            timeout=model_config_data.get("timeout", 300),
+            max_retries=model_config_data.get("max_retries", 3),
+            fallback_provider=model_config_data.get("fallback_provider"),
+            fallback_model=model_config_data.get("fallback_model")
+        )
+        
+        prompt_config_data = config_data.get("prompt_config", {})
+        prompt_config = LangGraphAgentPromptConfig(
+            system_prompt_file=prompt_config_data.get("system_prompt_file"),
+            system_prompt_template=prompt_config_data.get("system_prompt_template"),
+            custom_instructions=prompt_config_data.get("custom_instructions", []),
+            constraint_instructions=prompt_config_data.get("constraint_instructions", []),
+            response_format_instructions=prompt_config_data.get("response_format_instructions")
+        )
+        
+        behavior_config_data = config_data.get("behavior_config", {})
+        behavior_config = LangGraphAgentBehaviorConfig(
+            max_concurrent_tasks=behavior_config_data.get("max_concurrent_tasks", 5),
+            task_timeout=behavior_config_data.get("task_timeout", 600),
+            auto_retry_failed_tasks=behavior_config_data.get("auto_retry_failed_tasks", True),
+            enable_collaboration=behavior_config_data.get("enable_collaboration", True),
+            enable_learning=behavior_config_data.get("enable_learning", True),
+            memory_retention_hours=behavior_config_data.get("memory_retention_hours", 24),
+            importance_threshold=behavior_config_data.get("importance_threshold", 0.5)
+        )
+        
+        return LangGraphAgentConfig(
+            agent_type=agent_type,
+            enabled=config_data.get("enabled", True),
+            model_config=model_config,
+            prompt_config=prompt_config,
+            behavior_config=behavior_config,
+            capabilities=config_data.get("capabilities", []),
+            specializations=config_data.get("specializations", []),
+            custom_parameters=config_data.get("custom_parameters", {})
+        )
+    
+    def _create_default_config(self, agent_type: str) -> LangGraphAgentConfig:
+        """Create default configuration for an agent type."""
+        # Agent-specific defaults
+        agent_defaults = {
+            "orchestrator": {
+                "temperature": 0.3,
+                "max_tokens": 3000,
+                "capabilities": ["task_decomposition", "workflow_management", "agent_coordination"]
+            },
+            "architecture": {
+                "temperature": 0.3,
+                "max_tokens": 6000,
+                "capabilities": ["architecture_analysis", "design_patterns", "project_structure"]
+            },
+            "implementation": {
+                "temperature": 0.2,
+                "max_tokens": 8000,
+                "capabilities": ["code_generation", "feature_development", "ui_implementation"]
+            },
+            "testing": {
+                "temperature": 0.3,
+                "max_tokens": 6000,
+                "capabilities": ["test_generation", "quality_assurance", "test_automation"]
+            },
+            "security": {
+                "temperature": 0.2,
+                "max_tokens": 7000,
+                "capabilities": ["security_analysis", "vulnerability_assessment", "compliance"]
+            },
+            "devops": {
+                "temperature": 0.3,
+                "max_tokens": 7000,
+                "capabilities": ["deployment_automation", "ci_cd_setup", "infrastructure"]
+            },
+            "documentation": {
+                "temperature": 0.4,
+                "max_tokens": 8000,
+                "capabilities": ["documentation_generation", "api_docs", "user_guides"]
+            },
+            "performance": {
+                "temperature": 0.3,
+                "max_tokens": 7000,
+                "capabilities": ["performance_analysis", "optimization", "monitoring"]
+            }
         }
         
-        self._agent_configs.update(default_configs)
+        defaults = agent_defaults.get(agent_type, {})
+        
+        model_config = LangGraphAgentModelConfig(
+            temperature=defaults.get("temperature", 0.7),
+            max_tokens=defaults.get("max_tokens", 4000)
+        )
+        
+        prompt_config = LangGraphAgentPromptConfig(
+            system_prompt_file=f"{agent_type}_prompt.txt"
+        )
+        
+        return LangGraphAgentConfig(
+            agent_type=agent_type,
+            model_config=model_config,
+            prompt_config=prompt_config,
+            capabilities=defaults.get("capabilities", [])
+        )
     
     def get_agent_config(self, agent_type: str) -> Optional[LangGraphAgentConfig]:
         """Get configuration for a specific agent type."""
@@ -154,34 +219,40 @@ class LangGraphAgentConfigManager:
     
     def get_system_prompt(self, agent_type: str) -> str:
         """Get system prompt for an agent type."""
-        if agent_type in self._prompt_cache:
-            return self._prompt_cache[agent_type]
-        
         config = self.get_agent_config(agent_type)
-        if not config:
+        if not config or not config.prompt_config.system_prompt_file:
             return ""
         
-        prompt = ""
+        prompt_file = config.prompt_config.system_prompt_file
         
-        # Load from file if specified
-        if config.system_prompt_file:
-            prompt_file = self.config_dir / config.system_prompt_file
-            if prompt_file.exists():
-                prompt = prompt_file.read_text()
+        # Check cache first
+        if prompt_file in self._prompt_cache:
+            return self._prompt_cache[prompt_file]
         
-        # Use template if file not found
-        if not prompt and config.system_prompt_template:
-            prompt = config.system_prompt_template
-        
-        # Add custom instructions
-        if config.custom_instructions:
-            prompt += "\n\nADDITIONAL INSTRUCTIONS:\n"
-            prompt += "\n".join(f"- {instruction}" for instruction in config.custom_instructions)
-        
-        # Cache the prompt
-        self._prompt_cache[agent_type] = prompt
-        
-        return prompt
+        # Load from file
+        prompt_path = self.prompts_dir / prompt_file
+        try:
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                prompt_content = f.read().strip()
+            
+            # Cache the prompt
+            self._prompt_cache[prompt_file] = prompt_content
+            return prompt_content
+            
+        except FileNotFoundError:
+            print(f"Warning: Prompt file not found: {prompt_path}")
+            return ""
+        except Exception as e:
+            print(f"Error loading prompt file {prompt_path}: {e}")
+            return ""
+    
+    def reload_prompt(self, agent_type: str) -> None:
+        """Reload prompt from file, clearing cache."""
+        config = self.get_agent_config(agent_type)
+        if config and config.prompt_config.system_prompt_file:
+            # Clear cache entry
+            if config.prompt_config.system_prompt_file in self._prompt_cache:
+                del self._prompt_cache[config.prompt_config.system_prompt_file]
     
     def get_all_agent_types(self) -> List[str]:
         """Get list of all configured agent types."""
@@ -191,7 +262,281 @@ class LangGraphAgentConfigManager:
         """Check if an agent type is enabled."""
         config = self.get_agent_config(agent_type)
         return config.enabled if config else False
+    
+    def create_sample_configs(self) -> None:
+        """Create sample configuration files for all agent types."""
+        sample_configs = {
+            "orchestrator_sample.yaml": self._get_orchestrator_sample_config(),
+            "architecture_sample.yaml": self._get_architecture_sample_config(),
+            "implementation_sample.yaml": self._get_implementation_sample_config(),
+            "testing_sample.yaml": self._get_testing_sample_config(),
+            "security_sample.yaml": self._get_security_sample_config(),
+            "devops_sample.yaml": self._get_devops_sample_config(),
+            "documentation_sample.yaml": self._get_documentation_sample_config(),
+            "performance_sample.yaml": self._get_performance_sample_config()
+        }
+        
+        for filename, config_content in sample_configs.items():
+            config_path = self.config_dir / filename
+            if not config_path.exists():
+                with open(config_path, 'w') as f:
+                    yaml.dump(config_content, f, default_flow_style=False, indent=2)
+                print(f"Created sample config: {config_path}")
+    
+    def _get_orchestrator_sample_config(self) -> Dict[str, Any]:
+        """Get orchestrator sample configuration."""
+        return {
+            "enabled": True,
+            "model_config": {
+                "provider": "anthropic",
+                "model": "claude-3-5-sonnet-20240620",
+                "temperature": 0.3,
+                "max_tokens": 3000,
+                "timeout": 300,
+                "max_retries": 3
+            },
+            "prompt_config": {
+                "system_prompt_file": "orchestrator_prompt.txt",
+                "custom_instructions": [
+                    "Always provide clear task decomposition",
+                    "Consider agent capabilities when assigning tasks",
+                    "Monitor workflow progress actively"
+                ],
+                "constraint_instructions": [
+                    "Follow Flutter best practices",
+                    "Ensure quality at each workflow stage",
+                    "Maintain clear communication between agents"
+                ]
+            },
+            "behavior_config": {
+                "max_concurrent_tasks": 10,
+                "task_timeout": 1800,
+                "auto_retry_failed_tasks": True,
+                "enable_collaboration": True,
+                "enable_learning": True,
+                "memory_retention_hours": 72,
+                "importance_threshold": 0.7
+            },
+            "capabilities": [
+                "task_decomposition",
+                "workflow_management", 
+                "agent_coordination",
+                "progress_monitoring"
+            ],
+            "custom_parameters": {
+                "max_workflow_depth": 5,
+                "parallel_execution_limit": 3
+            }
+        }
+    
+    def _get_architecture_sample_config(self) -> Dict[str, Any]:
+        """Get architecture agent sample configuration."""
+        return {
+            "enabled": True,
+            "model_config": {
+                "provider": "anthropic",
+                "model": "claude-3-5-sonnet-20240620",
+                "temperature": 0.3,
+                "max_tokens": 6000,
+                "timeout": 600,
+                "max_retries": 3
+            },
+            "prompt_config": {
+                "system_prompt_file": "architecture_prompt.txt",
+                "custom_instructions": [
+                    "Always provide detailed rationale for architectural decisions",
+                    "Include specific Flutter/Dart implementation details",
+                    "Consider scalability and maintainability"
+                ],
+                "constraint_instructions": [
+                    "Follow SOLID principles",
+                    "Ensure clean architecture patterns",
+                    "Consider platform-specific requirements"
+                ]
+            },
+            "behavior_config": {
+                "max_concurrent_tasks": 3,
+                "task_timeout": 900,
+                "auto_retry_failed_tasks": True,
+                "enable_collaboration": True,
+                "enable_learning": True,
+                "memory_retention_hours": 48,
+                "importance_threshold": 0.8
+            },
+            "capabilities": [
+                "architecture_analysis",
+                "design_patterns",
+                "project_structure",
+                "technical_debt_assessment"
+            ],
+            "specializations": [
+                "clean_architecture",
+                "state_management_patterns",
+                "dependency_injection"
+            ]
+        }
+    
+    def _get_implementation_sample_config(self) -> Dict[str, Any]:
+        """Get implementation agent sample configuration."""
+        return {
+            "enabled": True,
+            "model_config": {
+                "provider": "anthropic",
+                "model": "claude-3-5-sonnet-20240620",
+                "temperature": 0.2,
+                "max_tokens": 8000,
+                "timeout": 900,
+                "max_retries": 3
+            },
+            "prompt_config": {
+                "system_prompt_file": "implementation_prompt.txt",
+                "custom_instructions": [
+                    "Generate complete, working code solutions",
+                    "Include comprehensive error handling",
+                    "Add meaningful comments and documentation"
+                ]
+            },
+            "behavior_config": {
+                "max_concurrent_tasks": 5,
+                "task_timeout": 1200,
+                "enable_collaboration": True
+            },
+            "capabilities": [
+                "code_generation",
+                "feature_development",
+                "ui_implementation",
+                "api_integration"
+            ]
+        }
+    
+    def _get_testing_sample_config(self) -> Dict[str, Any]:
+        """Get testing agent sample configuration."""
+        return {
+            "enabled": True,
+            "model_config": {
+                "provider": "anthropic",
+                "model": "claude-3-5-sonnet-20240620",
+                "temperature": 0.3,
+                "max_tokens": 6000,
+                "timeout": 600,
+                "max_retries": 3
+            },
+            "prompt_config": {
+                "system_prompt_file": "testing_prompt.txt"
+            },
+            "behavior_config": {
+                "max_concurrent_tasks": 4
+            },
+            "capabilities": [
+                "test_generation",
+                "quality_assurance",
+                "test_automation"
+            ]
+        }
+    
+    def _get_security_sample_config(self) -> Dict[str, Any]:
+        """Get security agent sample configuration."""
+        return {
+            "enabled": True,
+            "model_config": {
+                "provider": "anthropic",
+                "model": "claude-3-5-sonnet-20240620",
+                "temperature": 0.2,
+                "max_tokens": 7000,
+                "timeout": 800,
+                "max_retries": 3
+            },
+            "prompt_config": {
+                "system_prompt_file": "security_prompt.txt"
+            },
+            "behavior_config": {
+                "max_concurrent_tasks": 3
+            },
+            "capabilities": [
+                "security_analysis",
+                "vulnerability_assessment",
+                "compliance_checking"
+            ]
+        }
+    
+    def _get_devops_sample_config(self) -> Dict[str, Any]:
+        """Get devops agent sample configuration."""
+        return {
+            "enabled": True,
+            "model_config": {
+                "provider": "anthropic",
+                "model": "claude-3-5-sonnet-20240620",
+                "temperature": 0.3,
+                "max_tokens": 7000,
+                "timeout": 900,
+                "max_retries": 3
+            },
+            "prompt_config": {
+                "system_prompt_file": "devops_prompt.txt"
+            },
+            "behavior_config": {
+                "max_concurrent_tasks": 3
+            },
+            "capabilities": [
+                "deployment_automation",
+                "ci_cd_setup",
+                "infrastructure_management"
+            ]
+        }
+    
+    def _get_documentation_sample_config(self) -> Dict[str, Any]:
+        """Get documentation agent sample configuration."""
+        return {
+            "enabled": True,
+            "model_config": {
+                "provider": "anthropic",
+                "model": "claude-3-5-sonnet-20240620",
+                "temperature": 0.4,
+                "max_tokens": 8000,
+                "timeout": 600,
+                "max_retries": 3
+            },
+            "prompt_config": {
+                "system_prompt_file": "documentation_prompt.txt"
+            },
+            "behavior_config": {
+                "max_concurrent_tasks": 4
+            },
+            "capabilities": [
+                "documentation_generation",
+                "api_documentation",
+                "user_guides"
+            ]
+        }
+    
+    def _get_performance_sample_config(self) -> Dict[str, Any]:
+        """Get performance agent sample configuration."""
+        return {
+            "enabled": True,
+            "model_config": {
+                "provider": "anthropic",
+                "model": "claude-3-5-sonnet-20240620",
+                "temperature": 0.3,
+                "max_tokens": 7000,
+                "timeout": 700,
+                "max_retries": 3
+            },
+            "prompt_config": {
+                "system_prompt_file": "performance_prompt.txt"
+            },
+            "behavior_config": {
+                "max_concurrent_tasks": 3
+            },
+            "capabilities": [
+                "performance_analysis",
+                "optimization",
+                "monitoring_setup"
+            ]
+        }
 
 
 # Global configuration manager instance
 langgraph_agent_config_manager = LangGraphAgentConfigManager()
+
+# Backward compatibility alias
+agent_config_manager = langgraph_agent_config_manager

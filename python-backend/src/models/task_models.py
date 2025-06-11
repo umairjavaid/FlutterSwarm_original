@@ -139,3 +139,100 @@ class LangGraphWorkflowDefinition:
             "created_at": self.created_at.isoformat(),
             "valid_dependencies": self.validate_dependencies()
         }
+
+
+# Additional basic task models for backward compatibility
+class TaskType(Enum):
+    """Basic task types."""
+    ANALYSIS = "analysis"
+    IMPLEMENTATION = "implementation" 
+    TESTING = "testing"
+    DEPLOYMENT = "deployment"
+    DOCUMENTATION = "documentation"
+
+
+class ExecutionStrategy(Enum):
+    """Task execution strategies."""
+    SEQUENTIAL = "sequential"
+    PARALLEL = "parallel"
+    CONDITIONAL = "conditional"
+
+
+class TaskPriority(Enum):
+    """Task priority levels."""
+    LOW = "low"
+    NORMAL = "normal" 
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+@dataclass
+class TaskContext:
+    """Context for task execution."""
+    task_id: str
+    task_type: TaskType
+    description: str
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    dependencies: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "task_id": self.task_id,
+            "task_type": self.task_type.value,
+            "description": self.description,
+            "parameters": self.parameters,
+            "dependencies": self.dependencies,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat()
+        }
+
+
+@dataclass
+class Workflow:
+    """Basic workflow definition."""
+    workflow_id: str
+    name: str
+    description: str
+    tasks: List[TaskContext] = field(default_factory=list)
+    execution_strategy: ExecutionStrategy = ExecutionStrategy.SEQUENTIAL
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "workflow_id": self.workflow_id,
+            "name": self.name,
+            "description": self.description,
+            "tasks": [task.to_dict() for task in self.tasks],
+            "execution_strategy": self.execution_strategy.value,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat()
+        }
+
+
+@dataclass
+class TaskDecomposition:
+    """Task decomposition into subtasks."""
+    parent_task_id: str
+    subtasks: List[TaskContext] = field(default_factory=list)
+    decomposition_strategy: str = "functional"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "parent_task_id": self.parent_task_id,
+            "subtasks": [task.to_dict() for task in self.subtasks],
+            "decomposition_strategy": self.decomposition_strategy,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat()
+        }
+
+
+# Alias for backward compatibility
+WorkflowDefinition = Workflow

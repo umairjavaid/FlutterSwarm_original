@@ -613,8 +613,8 @@ IMPORTANT GUIDELINES:
         """Return the capabilities of this orchestrator agent."""
         return [AgentCapability.ORCHESTRATION]
     
-    async def get_system_prompt(self) -> str:
-        """Get the system prompt for the orchestrator agent."""
+    async def _get_default_system_prompt(self) -> str:
+        """Get the default system prompt for the orchestrator agent."""
         return """
 You are the Orchestrator Agent in the FlutterSwarm multi-agent system, responsible for coordinating all aspects of Flutter app development.
 
@@ -623,106 +623,6 @@ CORE RESPONSIBILITIES:
 2. Workflow Management: Design and execute efficient workflows across multiple agents
 3. Agent Coordination: Assign tasks to the most suitable specialized agents
 4. Progress Monitoring: Track task completion and handle dependencies
-5. Quality Assurance: Ensure deliverables meet requirements and standards
-6. Error Recovery: Handle failures and implement fallback strategies
-
-SPECIALIZED AGENTS AVAILABLE:
-- Architecture Agent: System design, patterns, project structure
-- Implementation Agent: Code generation, feature development
-- Testing Agent: Test creation, validation, quality assurance
-- DevOps Agent: Deployment, CI/CD, infrastructure
-- Security Agent: Security analysis, vulnerability assessment
-- Documentation Agent: Documentation generation, API docs
-
-DECISION-MAKING PRINCIPLES:
-- Always consider the full project context and requirements
-- Prioritize tasks based on dependencies and business value
-- Choose the most appropriate execution strategy (sequential, parallel, hybrid)
-- Ensure quality checkpoints throughout the workflow
-- Maintain clear communication between agents
-- Monitor resource utilization and optimize allocation
-
-WORKFLOW EXECUTION STRATEGIES:
-- Sequential: For tasks with strict dependencies
-- Parallel: For independent tasks that can run concurrently
-- Hybrid: Combination approach based on task characteristics
-
-OUTPUT REQUIREMENTS:
-- Provide clear, actionable task descriptions
-- Include specific requirements and success criteria
-- Define measurable deliverables
-- Estimate realistic timeframes
-- Consider error handling and rollback scenarios
 
 You must use logical reasoning to make all decisions and never rely on hardcoded rules.
 """
-
-    async def get_capabilities(self) -> List[str]:
-        """Get a list of orchestrator capabilities."""
-        return [
-            "task_decomposition",
-            "workflow_management",
-            "agent_coordination",
-            "progress_monitoring",
-            "resource_optimization",
-            "error_recovery",
-            "quality_assurance",
-            "dependency_resolution"
-        ]
-
-    async def _execute_specialized_processing(
-        self,
-        task_context: TaskContext,
-        llm_analysis: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Execute orchestrator-specific processing logic.
-        
-        For the orchestrator, this involves decomposing the task into a workflow
-        and coordinating its execution across multiple agents.
-        """
-        try:
-            # Create workflow from LLM analysis
-            workflow = await self._create_workflow_from_analysis(task_context, llm_analysis)
-            
-            if not workflow:
-                return {
-                    "error": "Failed to create workflow from analysis",
-                    "deliverables": {}
-                }
-            
-            # Execute the workflow
-            workflow_result = await self._execute_workflow(workflow)
-            
-            return {
-                "workflow_id": workflow.workflow_id,
-                "workflow_result": workflow_result,
-                "deliverables": workflow_result.get("deliverables", {}),
-                "execution_summary": {
-                    "total_tasks": len(workflow.tasks),
-                    "completed_tasks": workflow_result.get("completed_tasks", 0),
-                    "execution_time": workflow_result.get("execution_time", 0),
-                    "success": workflow_result.get("success", False)
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in orchestrator specialized processing: {e}")
-            return {
-                "error": str(e),
-                "deliverables": {}
-            }
-
-    async def _create_workflow_from_analysis(
-        self,
-        task_context: TaskContext,
-        llm_analysis: Dict[str, Any]
-    ) -> Optional[WorkflowDefinition]:
-        """Create a workflow definition from LLM analysis."""
-        try:
-            # Use the existing decomposition method but with analysis context
-            return await self._decompose_task_with_llm(task_context)
-            
-        except Exception as e:
-            logger.error(f"Error creating workflow from analysis: {e}")
-            return None

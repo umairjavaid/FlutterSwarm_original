@@ -234,6 +234,19 @@ class SupervisorAgent:
         # Parse decomposition result
         decomposition = self._parse_task_decomposition(response.content)
         
+        # Check if decomposition was successful
+        if "error" in decomposition or not decomposition.get("tasks"):
+            logger.error(f"Task decomposition failed: {decomposition.get('error', 'No tasks generated')}")
+            # Create a fallback simple task structure
+            decomposition = {
+                "tasks": [{
+                    "task_id": f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_1",
+                    "description": task_description,
+                    "agent_type": "implementation",  # Default to implementation agent
+                    "priority": "normal"
+                }]
+            }
+        
         # Update state
         new_messages = list(state.get("messages", []))
         new_messages.append(create_agent_message(
@@ -457,6 +470,14 @@ class SupervisorAgent:
     # Helper methods
     def _get_supervisor_system_prompt(self) -> str:
         """Get the supervisor system prompt."""
+        from ..config.agent_configs import agent_config_manager
+        
+        # Try to get from configuration first
+        config_prompt = agent_config_manager.get_system_prompt("supervisor")
+        if config_prompt:
+            return config_prompt
+            
+        # Fallback to default
         return """
         You are the Supervisor Agent in a LangGraph-based Flutter development workflow.
         
@@ -644,3 +665,62 @@ class SupervisorAgent:
                 "error": str(e),
                 "final_result": None
             }
+
+    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a task request."""
+        task_id = f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Execute the workflow
+        result = await self.execute_workflow(
+            task_description=request["description"],
+            project_context=request.get("project_context", {}),
+            workflow_id=task_id
+        )
+        
+        return {
+            "task_id": task_id,
+            "success": result.get("status") != "failed",
+            "status": result.get("status", "unknown"),
+            "result": result.get("final_result"),
+            "deliverables": result.get("deliverables", {}),
+            "workflow_id": result.get("workflow_id"),
+            "error": result.get("error")
+        }
+
+    @property
+    def agents(self) -> Dict[str, Any]:
+        """Get available agents for compatibility with CLI."""
+        return {
+            role: MockAgent(role, self._get_agent_capabilities(role))
+            for role in self.agent_roles
+        }
+
+    def _get_agent_capabilities(self, agent_role: str) -> List[str]:
+        """Get capabilities for an agent role."""
+        capabilities_map = {
+            "architecture": ["system_design", "architecture_planning", "pattern_selection"],
+            "implementation": ["code_generation", "feature_implementation", "refactoring"],
+            "testing": ["test_creation", "quality_assurance", "test_automation"],
+            "security": ["security_analysis", "vulnerability_assessment", "compliance"],
+            "devops": ["deployment", "ci_cd", "infrastructure_automation"],
+            "documentation": ["documentation_creation", "api_docs", "user_guides"],
+            "performance": ["performance_analysis", "optimization", "monitoring"]
+        }
+        return capabilities_map.get(agent_role, ["general_purpose"])
+
+
+class MockAgent:
+    """Mock agent for CLI compatibility."""
+    
+    def __init__(self, agent_type: str, capabilities: List[str]):
+        self.agent_type = agent_type
+        self.capabilities = capabilities
+    
+    async def get_status(self) -> Dict[str, Any]:
+        """Get agent status."""
+        return {
+            "agent_type": self.agent_type,
+            "status": "available",
+            "capabilities": self.capabilities,
+            "active_tasks": 0
+        }
