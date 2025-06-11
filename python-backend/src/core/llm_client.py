@@ -67,11 +67,6 @@ class BaseLLMProvider(ABC):
         """Generate response from the LLM."""
         pass
     
-    @abstractmethod
-    async def generate_embedding(self, text: str) -> List[float]:
-        """Generate text embedding."""
-        pass
-    
     async def _check_rate_limit(self) -> None:
         """Check and enforce rate limiting."""
         now = time.time()
@@ -136,21 +131,6 @@ class OpenAIProvider(BaseLLMProvider):
         except Exception as e:
             raise LLMError(f"OpenAI API error: {str(e)}")
     
-    async def generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding using OpenAI's embedding API."""
-        await self._check_rate_limit()
-        
-        try:
-            response = await self.client.embeddings.create(
-                model="text-embedding-ada-002",
-                input=text
-            )
-            
-            return response.data[0].embedding
-            
-        except Exception as e:
-            raise LLMError(f"OpenAI embedding error: {str(e)}")
-
 
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic (Claude) LLM provider implementation."""
@@ -168,40 +148,39 @@ class AnthropicProvider(BaseLLMProvider):
         start_time = time.time()
         
         try:
-            # Format the prompt for Claude
-            formatted_prompt = request.prompt
-            if request.system_prompt:
-                formatted_prompt = f"System: {request.system_prompt}\n\nHuman: {request.prompt}\n\nAssistant:"
-            else:
-                formatted_prompt = f"Human: {request.prompt}\n\nAssistant:"
+            # Format messages for Claude API
+            messages = []
             
-            # Make the API call
-            response = await self.client.completions.create(
+            # Add system message if provided
+            if request.system_prompt:
+                messages.append({"role": "user", "content": f"System: {request.system_prompt}\n\nUser: {request.prompt}"})
+            else:
+                messages.append({"role": "user", "content": request.prompt})
+            
+            # Use the correct Anthropic API endpoint
+            response = await self.client.messages.create(
                 model=request.model,
-                prompt=formatted_prompt,
+                messages=messages,
                 temperature=request.temperature,
-                max_tokens_to_sample=request.max_tokens
+                max_tokens=request.max_tokens
             )
             
             response_time = time.time() - start_time
             
             return LLMResponse(
-                content=response.completion,
+                content=response.content[0].text,
                 model=request.model,
-                tokens_used=len(response.completion.split()),  # Approximate token count
+                tokens_used=response.usage.input_tokens + response.usage.output_tokens,
                 response_time=response_time,
-                finish_reason="stop",  # Anthropic doesn't provide finish_reason
-                metadata={}
+                finish_reason=response.stop_reason or "stop",
+                metadata={
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens
+                }
             )
             
         except Exception as e:
             raise LLMError(f"Anthropic API error: {str(e)}")
-    
-    async def generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding - Anthropic doesn't provide embeddings, fallback to OpenAI."""
-        # For now, use a simple hash-based approach or fallback to OpenAI
-        # In production, you might want to use a separate embedding service
-        raise LLMError("Anthropic provider doesn't support embeddings")
 
 
 class LLMClient:
@@ -344,30 +323,6 @@ class LLMClient:
                     )
                     self.interactions.append(interaction)
                     raise LLMError(f"Failed to generate response after {retry_count} retries: {last_error}")
-    
-    async def generate_embedding(
-        self,
-        text: str,
-        provider: Optional[str] = None
-    ) -> List[float]:
-        """
-        Generate text embedding using the specified or default provider.
-        
-        Args:
-            text: Text to embed
-            provider: Specific provider to use (optional)
-            
-        Returns:
-            Embedding vector as list of floats
-        """
-        provider_name = provider or self.default_provider
-        if provider_name not in self.providers:
-            raise LLMError(f"Provider '{provider_name}' not available")
-        
-        try:
-            return await self.providers[provider_name].generate_embedding(text)
-        except Exception as e:
-            raise LLMError(f"Failed to generate embedding: {e}")
     
     def _select_provider(self, model: str) -> str:
         """Select appropriate provider based on model name."""

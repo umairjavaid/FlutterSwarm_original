@@ -19,6 +19,7 @@ from ..core.event_bus import EventBus
 from ..core.memory_manager import MemoryManager
 from ..models.agent_models import AgentMessage, AgentStatus, TaskResult
 from ..models.task_models import TaskContext
+from ..config.agent_configs import agent_config_manager
 
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,9 @@ class BaseAgent(ABC):
         self.created_at = datetime.utcnow()
         self.last_activity = datetime.utcnow()
         
+        # Load agent-specific configuration
+        self.agent_config = agent_config_manager.get_agent_config(self.agent_type)
+        
         # Initialize agent-specific logging
         self.logger = logging.getLogger(f"{__name__}.{self.agent_type}.{self.agent_id}")
         
@@ -124,16 +128,21 @@ class BaseAgent(ABC):
             self.logger.error(f"Failed to register event handlers: {e}")
             raise
     
-    @abstractmethod
     async def get_system_prompt(self) -> str:
         """
-        Get the system prompt that defines this agent's role and capabilities.
-        
-        This prompt is used to instruct the LLM about the agent's specific
-        domain expertise, responsibilities, and expected behavior patterns.
+        Get the system prompt from configuration.
         
         Returns:
             Comprehensive system prompt string for LLM initialization
+        """
+        config_prompt = agent_config_manager.get_system_prompt(self.agent_type)
+        return config_prompt if config_prompt else await self._get_default_system_prompt()
+    
+    @abstractmethod
+    async def _get_default_system_prompt(self) -> str:
+        """
+        Get the default system prompt for this agent type.
+        This is a fallback when no configuration prompt is available.
         """
         pass
     
@@ -153,28 +162,22 @@ class BaseAgent(ABC):
         user_prompt: str,
         context: Dict[str, Any],
         structured_output: bool = False,
-        max_retries: int = 3
+        max_retries: int = None
     ) -> Union[str, Dict[str, Any]]:
         """
         Execute a task using LLM reasoning with comprehensive context.
-        
-        This method constructs a complete prompt including system instructions,
-        project context, memory context, and specific task requirements.
         
         Args:
             user_prompt: The specific task or question for the LLM
             context: Additional context including project state, constraints, etc.
             structured_output: Whether to expect JSON-formatted response
-            max_retries: Maximum number of retry attempts on failure
+            max_retries: Maximum number of retry attempts on failure (uses config if None)
         
         Returns:
             LLM response as string or parsed JSON dictionary
-        
-        Raises:
-            LLMError: If LLM reasoning fails after retries
-            AgentError: If response format is invalid
         """
-        from models.agent_models import LLMError, AgentError
+        if max_retries is None:
+            max_retries = self.agent_config.model_config.max_retries if self.agent_config else 3
         
         system_prompt = await self.get_system_prompt()
         memory_context = await self.memory_manager.get_relevant_context(
@@ -194,12 +197,22 @@ class BaseAgent(ABC):
             try:
                 self.logger.debug(f"LLM execution attempt {attempt + 1}/{max_retries}")
                 
+                # Use configuration for model parameters
+                model = self.agent_config.model_config.model if self.agent_config else self.config.llm_model
+                temperature = self.agent_config.model_config.temperature if self.agent_config else self.config.temperature
+                max_tokens = self.agent_config.model_config.max_tokens if self.agent_config else self.config.max_tokens
+                timeout = self.agent_config.model_config.timeout if self.agent_config else self.config.timeout
+                provider = self.agent_config.model_config.provider if self.agent_config else None
+                
                 response = await self.llm_client.generate(
                     prompt=full_prompt,
-                    model=self.config.llm_model,
-                    temperature=self.config.temperature,
-                    max_tokens=self.config.max_tokens,
-                    timeout=self.config.timeout
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                    provider=provider,
+                    agent_id=self.agent_id,
+                    correlation_id=context.get('correlation_id', '')
                 )
                 
                 # Store interaction in memory
@@ -224,6 +237,33 @@ class BaseAgent(ABC):
                 
             except Exception as e:
                 self.logger.error(f"LLM execution failed (attempt {attempt + 1}): {e}")
+                
+                # Try fallback provider if configured
+                if (attempt == 0 and self.agent_config and 
+                    self.agent_config.model_config.fallback_provider):
+                    try:
+                        fallback_response = await self.llm_client.generate(
+                            prompt=full_prompt,
+                            model=self.agent_config.model_config.fallback_model or model,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            timeout=timeout,
+                            provider=self.agent_config.model_config.fallback_provider,
+                            agent_id=self.agent_id,
+                            correlation_id=context.get('correlation_id', '')
+                        )
+                        
+                        if structured_output:
+                            try:
+                                return json.loads(fallback_response.strip())
+                            except json.JSONDecodeError:
+                                pass
+                        
+                        return fallback_response.strip()
+                        
+                    except Exception as fallback_error:
+                        self.logger.warning(f"Fallback provider also failed: {fallback_error}")
+                
                 if attempt == max_retries - 1:
                     raise LLMError(f"LLM execution failed after {max_retries} attempts: {e}")
                 await asyncio.sleep(2 ** attempt)  # Exponential backoff

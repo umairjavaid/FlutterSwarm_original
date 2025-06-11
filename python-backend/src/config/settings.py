@@ -54,7 +54,6 @@ class AgentConfig:
     """Agent system configuration."""
     memory_ttl: int = 3600  # seconds
     max_memory_entries: int = 1000
-    embedding_model: str = "text-embedding-ada-002"
     context_window_size: int = 8000
     max_concurrent_tasks: int = 5
     task_timeout: int = 300  # seconds

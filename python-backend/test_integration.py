@@ -4,7 +4,7 @@ Integration Test for FlutterSwarm Multi-Agent System Phase 1 & 2.
 This test verifies that all core components work together correctly:
 - System initialization
 - LLM client integration
-- Memory management with embeddings
+- Memory management
 - Event bus communication
 - Orchestrator agent functionality
 - Task processing workflow
@@ -157,7 +157,7 @@ class TestFlutterSwarmIntegration:
         search_results = await memory_manager.search_memory(
             query="integration testing",
             limit=5,
-            similarity_threshold=0.1  # Low threshold for fallback search
+            similarity_threshold=0.7  # Use standard threshold
         )
         
         assert len(search_results) > 0, "Search should return results"

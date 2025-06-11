@@ -1,0 +1,36 @@
+enabled: true
+
+model_config:
+  provider: "openai"
+  model: "gpt-4"
+  temperature: 0.3
+  max_tokens: 6000
+  timeout: 600
+  max_retries: 3
+
+behavior_config:
+  max_concurrent_tasks: 3
+  task_timeout: 600
+  memory_retention_hours: 48
+  importance_threshold: 0.7
+  auto_retry_failed_tasks: true
+  enable_learning: true
+  enable_collaboration: true
+
+prompt_config:
+  system_prompt_file: "architecture_prompt.txt"
+  custom_instructions:
+    - "Always provide detailed rationale for architectural decisions"
+    - "Include specific Flutter/Dart implementation details"
+    - "Consider long-term scalability and maintenance"
+  constraint_instructions:
+    - "Follow Flutter and Dart best practices"
+    - "Ensure cross-platform compatibility"
+    - "Prioritize maintainability and testability"
+  response_format_instructions: "Provide structured JSON responses for architectural analysis"
+
+custom_parameters:
+  architecture_patterns_enabled: ["clean_architecture", "bloc", "provider", "riverpod", "getx"]
+  analysis_depth: "comprehensive"
+  include_code_examples: true
+  generate_migration_plans: true
