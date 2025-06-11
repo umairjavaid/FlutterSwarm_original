@@ -13,16 +13,14 @@ load_dotenv()
 @dataclass
 class LLMConfig:
     """LLM provider configuration."""
-    openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
-    default_model: str = "gpt-4"
+    default_model: str = "claude-3-5-sonnet-20240620"
     max_tokens: int = 4000
     temperature: float = 0.7
     timeout: int = 30
     max_retries: int = 3
     
     def __post_init__(self):
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 
@@ -101,8 +99,8 @@ class Settings:
     
     def validate(self) -> None:
         """Validate configuration settings."""
-        if not self.llm.openai_api_key and not self.llm.anthropic_api_key:
-            raise ValueError("At least one LLM API key must be provided")
+        if not self.llm.anthropic_api_key:
+            raise ValueError("Anthropic API key must be provided")
         
         if not self.database.url:
             raise ValueError("Database URL is required")

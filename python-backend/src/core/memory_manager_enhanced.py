@@ -43,7 +43,7 @@ class MemoryManager:
         self._access_counts: Dict[str, int] = defaultdict(int)
         self._last_cleanup = datetime.utcnow()
         
-        # OpenAI ada-002 embedding dimension
+        # Anthropic embedding dimension (using standard 1536 for compatibility)
         self._embedding_dim = 1536
         
         logger.info(f"MemoryManager initialized for agent {agent_id}")

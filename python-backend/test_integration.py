@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 # Setup test environment
-os.environ["OPENAI_API_KEY"] = "test-key"  # Use test key for demo
+os.environ["ANTHROPIC_API_KEY"] = "test-key"  # Use test key for demo
 os.environ["LOG_LEVEL"] = "INFO"
 os.environ["ENVIRONMENT"] = "test"
 

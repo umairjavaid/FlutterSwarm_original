@@ -93,11 +93,11 @@ class LangGraphAgentNode:
                     
                     # Execute agent task with tracing
                     result = await trace_agent_task(
+                        task_context,
                         agent_id=self.agent.agent_id,
                         task_id=task_id,
                         task_type=task_data.get("task_type", "unknown"),
                         func=self.agent.process_task,
-                        task_context
                     )
                     
                     # Store result

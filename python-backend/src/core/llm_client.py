@@ -1,9 +1,8 @@
 """
 LLM Client for FlutterSwarm Multi-Agent System.
 
-This module provides a unified interface for interacting with various LLM providers
-including OpenAI, Anthropic, and others. It handles authentication, rate limiting,
-retries, and logging for all LLM interactions.
+This module provides a unified interface for interacting with Anthropic's Claude models.
+It handles authentication, rate limiting, retries, and logging for all LLM interactions.
 """
 
 import asyncio
@@ -15,14 +14,13 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 import aiohttp
-import openai
 
 from ..config import settings
 from ..models.agent_models import LLMInteraction, LLMError
 
 logger = logging.getLogger(__name__)
 
-# Optional import for Anthropic
+# Import for Anthropic
 try:
     from anthropic import AsyncAnthropic
     ANTHROPIC_AVAILABLE = True
@@ -83,55 +81,6 @@ class BaseLLMProvider(ABC):
         self._request_times.append(now)
 
 
-class OpenAIProvider(BaseLLMProvider):
-    """OpenAI LLM provider implementation."""
-    
-    def __init__(self, api_key: str, rate_limit: int = 60):
-        super().__init__(api_key, rate_limit)
-        self.client = openai.AsyncOpenAI(api_key=api_key)
-    
-    async def generate(self, request: LLMRequest) -> LLMResponse:
-        """Generate response using OpenAI's API."""
-        await self._check_rate_limit()
-        
-        start_time = time.time()
-        
-        try:
-            messages = []
-            
-            # Add system prompt if provided
-            if request.system_prompt:
-                messages.append({"role": "system", "content": request.system_prompt})
-            
-            # Add user prompt
-            messages.append({"role": "user", "content": request.prompt})
-            
-            # Make the API call
-            response = await self.client.chat.completions.create(
-                model=request.model,
-                messages=messages,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens
-            )
-            
-            response_time = time.time() - start_time
-            
-            return LLMResponse(
-                content=response.choices[0].message.content,
-                model=response.model,
-                tokens_used=response.usage.total_tokens,
-                response_time=response_time,
-                finish_reason=response.choices[0].finish_reason,
-                metadata={
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens
-                }
-            )
-            
-        except Exception as e:
-            raise LLMError(f"OpenAI API error: {str(e)}")
-    
-
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic (Claude) LLM provider implementation."""
     
@@ -185,7 +134,7 @@ class AnthropicProvider(BaseLLMProvider):
 
 class LLMClient:
     """
-    Unified LLM client that manages multiple providers and handles
+    LLM client that manages Anthropic provider and handles
     routing, retries, fallbacks, and logging.
     """
     
@@ -198,17 +147,8 @@ class LLMClient:
         self._initialize_providers()
     
     def _initialize_providers(self) -> None:
-        """Initialize LLM providers based on configuration."""
+        """Initialize Anthropic provider based on configuration."""
         try:
-            # OpenAI provider
-            if hasattr(settings.llm, 'openai_api_key') and settings.llm.openai_api_key:
-                self.providers['openai'] = OpenAIProvider(
-                    api_key=settings.llm.openai_api_key,
-                    rate_limit=getattr(settings.llm, 'openai_rate_limit', 60)
-                )
-                if not self.default_provider:
-                    self.default_provider = 'openai'
-            
             # Anthropic provider
             if hasattr(settings.llm, 'anthropic_api_key') and settings.llm.anthropic_api_key:
                 if ANTHROPIC_AVAILABLE:
@@ -216,16 +156,15 @@ class LLMClient:
                         api_key=settings.llm.anthropic_api_key,
                         rate_limit=getattr(settings.llm, 'anthropic_rate_limit', 60)
                     )
-                    if not self.default_provider:
-                        self.default_provider = 'anthropic'
+                    self.default_provider = 'anthropic'
                 else:
-                    logger.warning("Anthropic API key provided but anthropic library not installed")
+                    logger.error("Anthropic API key provided but anthropic library not installed")
                     
         except Exception as e:
             raise LLMError(f"Failed to initialize LLM providers: {e}")
         
         if not self.providers:
-            raise LLMError("No LLM providers configured")
+            raise LLMError("No LLM providers configured. Please set ANTHROPIC_API_KEY")
     
     async def generate(
         self,
@@ -328,18 +267,13 @@ class LLMClient:
         """Select appropriate provider based on model name."""
         model_lower = model.lower()
         
-        # OpenAI models
-        if any(name in model_lower for name in ['gpt', 'davinci', 'curie', 'babbage', 'ada']):
-            if 'openai' in self.providers:
-                return 'openai'
-        
         # Anthropic models
         if any(name in model_lower for name in ['claude', 'anthropic']):
             if 'anthropic' in self.providers:
                 return 'anthropic'
         
         # Fallback to default provider
-        return self.default_provider
+        return self.default_provider or 'anthropic'
     
     def get_interactions(
         self,

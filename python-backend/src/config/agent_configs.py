@@ -14,8 +14,8 @@ from .settings import settings
 @dataclass
 class LangGraphAgentModelConfig:
     """Configuration for LangGraph agent LLM model settings."""
-    provider: str = "openai"  # openai, anthropic, local
-    model: str = "gpt-4"
+    provider: str = "anthropic"  # anthropic, local
+    model: str = "claude-3-5-sonnet-20240620"
     temperature: float = 0.7
     max_tokens: int = 4000
     timeout: int = 300
@@ -56,8 +56,8 @@ class LangGraphAgentConfigManager:
             "supervisor": LangGraphAgentConfig(
                 agent_type="supervisor",
                 model_config=LangGraphAgentModelConfig(
-                    provider="openai",
-                    model="gpt-4",
+                    provider="anthropic",
+                    model="claude-3-5-sonnet-20240620",
                     temperature=0.3,
                     max_tokens=6000,
                     timeout=600
@@ -69,8 +69,8 @@ class LangGraphAgentConfigManager:
             "architecture": LangGraphAgentConfig(
                 agent_type="architecture",
                 model_config=LangGraphAgentModelConfig(
-                    provider="openai",
-                    model="gpt-4",
+                    provider="anthropic",
+                    model="claude-3-5-sonnet-20240620",
                     temperature=0.3,
                     max_tokens=6000,
                     timeout=600
@@ -82,8 +82,8 @@ class LangGraphAgentConfigManager:
             "implementation": LangGraphAgentConfig(
                 agent_type="implementation",
                 model_config=LangGraphAgentModelConfig(
-                    provider="openai",
-                    model="gpt-4",
+                    provider="anthropic",
+                    model="claude-3-5-sonnet-20240620",
                     temperature=0.2,
                     max_tokens=8000,
                     timeout=900

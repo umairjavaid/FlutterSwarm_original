@@ -12,7 +12,6 @@ from datetime import datetime
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
@@ -58,22 +57,16 @@ class SupervisorAgent:
     
     def _create_llm(self):
         """Create LLM instance based on configuration."""
-        if hasattr(settings, 'llm') and hasattr(settings.llm, 'openai_api_key') and settings.llm.openai_api_key:
-            return ChatOpenAI(
-                model="gpt-4",
-                temperature=0.3,
-                api_key=settings.llm.openai_api_key
-            )
-        elif hasattr(settings, 'llm') and hasattr(settings.llm, 'anthropic_api_key') and settings.llm.anthropic_api_key:
+        if hasattr(settings, 'llm') and hasattr(settings.llm, 'anthropic_api_key') and settings.llm.anthropic_api_key:
             return ChatAnthropic(
-                model="claude-3-sonnet-20240229",
+                model="claude-3-5-sonnet-20240620",
                 temperature=0.3,
                 api_key=settings.llm.anthropic_api_key
             )
         else:
-            # Fallback to OpenAI with environment variable
-            return ChatOpenAI(
-                model="gpt-4",
+            # Fallback to Anthropic with environment variable
+            return ChatAnthropic(
+                model="claude-3-5-sonnet-20240620",
                 temperature=0.3
             )
     

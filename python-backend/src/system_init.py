@@ -20,7 +20,7 @@ async def initialize_flutterswarm() -> bool:
         # Check available LLM providers
         available_providers = settings.llm.get_available_providers()
         if not available_providers:
-            raise ValueError("No LLM API keys found. Please set OPENAI_API_KEY or ANTHROPIC_API_KEY in your .env file")
+            raise ValueError("No LLM API keys found. Please set ANTHROPIC_API_KEY in your .env file")
         
         default_model = settings.llm.default_model
         default_provider = settings.llm.get_default_provider()
