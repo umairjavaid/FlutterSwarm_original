@@ -228,7 +228,7 @@ class SupervisorAgent:
         
         # Create decomposition prompt
         prompt = f"""
-        Analyze the following task and decompose it into specific subtasks for Flutter development agents:
+        Analyze the following task and decompose it into specific subtasks for Flutter development agents.
         
         TASK: {task_description}
         
@@ -236,8 +236,51 @@ class SupervisorAgent:
         
         AVAILABLE AGENTS: {', '.join(self.agent_roles)}
         
-        Provide a JSON response with subtasks, each assigned to the most appropriate agent type.
-        Include dependencies, priorities, and expected deliverables.
+        You MUST respond with ONLY a valid JSON object in this exact format:
+        
+        {{
+            "tasks": [
+                {{
+                    "task_id": "task_001",
+                    "description": "Design application architecture",
+                    "agent_type": "architecture",
+                    "priority": "high",
+                    "estimated_duration": 30,
+                    "dependencies": [],
+                    "deliverables": ["Architecture diagram", "Technical specifications"]
+                }},
+                {{
+                    "task_id": "task_002", 
+                    "description": "Implement Flutter UI components",
+                    "agent_type": "implementation",
+                    "priority": "high",
+                    "estimated_duration": 60,
+                    "dependencies": ["task_001"],
+                    "deliverables": ["Working Flutter app", "Source code"]
+                }}
+            ],
+            "workflow_name": "Simple Button App Development",
+            "total_estimated_time": 90
+        }}
+        
+        Agent Types Available:
+        - architecture: App structure and design patterns
+        - implementation: Flutter code development
+        - testing: Unit and integration tests
+        - security: Security analysis and hardening
+        - devops: Deployment and CI/CD
+        - documentation: API docs and user guides
+        - performance: Optimization and profiling
+        
+        Requirements:
+        - Each task must have a unique task_id
+        - agent_type must be one of the available agents
+        - priority can be: "high", "medium", "low"
+        - estimated_duration is in minutes
+        - dependencies reference task_ids that must complete first
+        - Include specific deliverables for each task
+        
+        Respond with ONLY the JSON object, no explanation or markdown formatting.
         """
         
         response = await self.llm.ainvoke([
@@ -617,15 +660,43 @@ class SupervisorAgent:
     
     def _parse_task_decomposition(self, response: str) -> Dict[str, Any]:
         """Parse task decomposition response."""
-        # Simplified parsing - implement robust JSON extraction
         try:
-            # Extract JSON from response
-            start = response.find('{')
-            end = response.rfind('}') + 1
-            json_str = response[start:end] if start != -1 and end > start else '{}'
+            # Clean up the response
+            response_clean = response.strip()
             
-            result = json.loads(json_str)
-            return result
+            # Remove markdown code block markers if present
+            if response_clean.startswith("```json"):
+                response_clean = response_clean[7:]
+            elif response_clean.startswith("```"):
+                response_clean = response_clean[3:]
+            
+            if response_clean.endswith("```"):
+                response_clean = response_clean[:-3]
+            
+            response_clean = response_clean.strip()
+            
+            # Extract JSON from response
+            start = response_clean.find('{')
+            end = response_clean.rfind('}') + 1
+            
+            if start != -1 and end > start:
+                json_str = response_clean[start:end]
+                result = json.loads(json_str)
+                
+                # Validate that result has tasks
+                if "tasks" not in result or not isinstance(result["tasks"], list):
+                    logger.warning("Task decomposition response missing tasks array")
+                    return {"tasks": [], "error": "Missing tasks array in response"}
+                
+                return result
+            else:
+                logger.error("No valid JSON found in response")
+                return {"tasks": [], "error": "No valid JSON found in response"}
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON in task decomposition: {e}")
+            logger.debug(f"Raw response: {response[:500]}...")
+            return {"tasks": [], "error": f"JSON parsing failed: {str(e)}"}
         except Exception as e:
             logger.error(f"Failed to parse task decomposition: {e}")
             return {"tasks": [], "error": str(e)}
