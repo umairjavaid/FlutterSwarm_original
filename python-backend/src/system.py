@@ -20,7 +20,7 @@ from .agents.devops_agent import DevOpsAgent
 from .agents.security_agent import SecurityAgent
 from .agents.documentation_agent import DocumentationAgent
 from .config.settings import settings
-from .config import get_logger
+from .config import setup_logging, get_logger
 from src.config.agent_configs import agent_config_manager
 
 logger = get_logger("system")
@@ -33,7 +33,21 @@ async def create_langgraph_workflow(
     redis_url: Optional[str] = None,
     enable_langsmith: bool = False
 ):
-    """Create a LangGraph-based workflow for the system."""
+    """Initialize LangGraph workflow with enhanced logging."""
+    
+    # Set up logging first
+    setup_logging()
+    
+    logger.info(
+        "Initializing LangGraph workflow",
+        operation="system_init",
+        metadata={
+            "project_name": project_name,
+            "checkpointer_backend": checkpointer_backend,
+            "enable_langsmith": enable_langsmith
+        }
+    )
+    
     from .agents.langgraph_supervisor import SupervisorAgent
     from .core.langsmith_integration import initialize_tracer
     

@@ -18,14 +18,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.system import initialize_system, start_system, stop_system, get_system
 from src.config.settings import settings
+from src.config import setup_logging, get_logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-logger = logging.getLogger("flutterswarm_cli")
+# Configure logging with enhanced logger
+setup_logging()
+logger = get_logger("flutterswarm_cli")
 
 
 class FlutterSwarmCLI:
