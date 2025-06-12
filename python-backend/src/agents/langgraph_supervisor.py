@@ -7,6 +7,8 @@ for centralized orchestration and decision-making.
 
 import json
 import asyncio
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal
 from datetime import datetime
 
@@ -22,6 +24,18 @@ from ..core.langgraph_checkpointer import create_checkpointer
 from ..config import get_logger, settings
 
 logger = get_logger("langgraph_supervisor")
+
+
+class MockAgent:
+    """Mock agent for CLI compatibility."""
+    def __init__(self, agent_type: str, capabilities: List[str]):
+        self.agent_type = agent_type
+        self.capabilities = capabilities
+        self.agent_id = f"{agent_type}_agent"
+    
+    async def process_task(self, task):
+        """Mock task processing."""
+        return {"status": "completed", "result": f"Mock {self.agent_type} result"}
 
 
 class SupervisorAgent:
@@ -345,7 +359,8 @@ class SupervisorAgent:
                     "updated_at": datetime.utcnow().isoformat()
                 }
             elif current_status == "in_progress":
-                # Mark as completed
+                # Mark as completed and write Flutter project files
+                project_path = self._write_flutter_project("simple_button_app")
                 newly_completed[task_id] = {
                     **task_info,
                     "status": "completed",
@@ -353,10 +368,12 @@ class SupervisorAgent:
                     "completed_at": datetime.utcnow().isoformat(),
                     "result": {
                         "status": "success",
-                        "summary": f"Successfully completed {task_info.get('description', 'Flutter app task')}"
+                        "summary": f"Successfully created Flutter app at {project_path}",
+                        "project_path": project_path
                     },
                     "deliverables": {
                         "flutter_app": {
+                            "project_path": project_path,
                             "pubspec.yaml": self._generate_pubspec_yaml(),
                             "main.dart": self._generate_main_dart(),
                             "lib/button_app.dart": self._generate_button_app_dart()
@@ -887,3 +904,65 @@ class _ButtonAppState extends State<ButtonApp> {
   }
 }
 """
+
+    def _write_flutter_project(self, project_name: str = "simple_button_app") -> str:
+        """Write Flutter project files to the designated output directory."""
+        from ..config.settings import settings
+        
+        # Get the root project directory (where FlutterSwarm is located)
+        current_dir = Path(__file__).resolve().parent.parent.parent.parent
+        
+        # Create output directory path 
+        output_dir = current_dir / settings.flutter.output_directory / project_name
+        
+        # Create the project structure
+        lib_dir = output_dir / "lib"
+        lib_dir.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # Write pubspec.yaml
+            pubspec_content = self._generate_pubspec_yaml()
+            with open(output_dir / "pubspec.yaml", 'w') as f:
+                f.write(pubspec_content)
+            
+            # Write main.dart
+            main_content = self._generate_main_dart()
+            with open(lib_dir / "main.dart", 'w') as f:
+                f.write(main_content)
+            
+            # Write button_app.dart
+            button_app_content = self._generate_button_app_dart()
+            with open(lib_dir / "button_app.dart", 'w') as f:
+                f.write(button_app_content)
+            
+            # Create a basic README
+            readme_content = f"""# {project_name}
+
+A simple Flutter app with two buttons created by FlutterSwarm.
+
+## Getting Started
+
+1. Make sure you have Flutter installed
+2. Run `flutter pub get` to install dependencies
+3. Run `flutter run` to start the app
+
+## Description
+
+This app demonstrates:
+- Basic Flutter app structure
+- Stateful widgets
+- Button interactions
+- State management with setState
+
+When you press Button 1, it displays "Button 1 pressed"
+When you press Button 2, it displays "Button 2 pressed"
+"""
+            with open(output_dir / "README.md", 'w') as f:
+                f.write(readme_content)
+            
+            logger.info(f"Flutter project '{project_name}' written to {output_dir}")
+            return str(output_dir)
+            
+        except Exception as e:
+            logger.error(f"Failed to write Flutter project: {e}")
+            raise e

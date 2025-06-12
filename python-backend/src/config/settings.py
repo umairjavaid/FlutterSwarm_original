@@ -72,6 +72,19 @@ class EventBusConfig:
 
 
 @dataclass
+class FlutterConfig:
+    """Flutter project configuration."""
+    output_directory: str = "flutter_projects"
+    default_flutter_version: str = "3.0.0"
+    default_dart_version: str = "3.0.0"
+    
+    def __post_init__(self):
+        self.output_directory = os.getenv("FLUTTER_OUTPUT_DIR", self.output_directory)
+        self.default_flutter_version = os.getenv("FLUTTER_VERSION", self.default_flutter_version)
+        self.default_dart_version = os.getenv("DART_VERSION", self.default_dart_version)
+
+
+@dataclass
 class Settings:
     """Main application settings."""
     log_level: str = "INFO"
@@ -84,6 +97,7 @@ class Settings:
     redis: RedisConfig = None
     agent: AgentConfig = None
     event_bus: EventBusConfig = None
+    flutter: FlutterConfig = None
     
     def __post_init__(self):
         self.log_level = os.getenv("LOG_LEVEL", self.log_level)
@@ -96,6 +110,7 @@ class Settings:
         self.redis = RedisConfig()
         self.agent = AgentConfig()
         self.event_bus = EventBusConfig()
+        self.flutter = FlutterConfig()
     
     def validate(self) -> None:
         """Validate configuration settings."""

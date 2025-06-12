@@ -193,4 +193,9 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Generated Flutter apps and builds
+flutter_projects/
+generated_apps/
+build_output/
+
 *.pdf
