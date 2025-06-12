@@ -15,6 +15,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
+from ..core.exceptions import AgentError, LLMError
+
 from ..core.event_bus import EventBus
 from ..core.memory_manager import MemoryManager
 from ..models.agent_models import AgentMessage, AgentStatus, TaskResult
@@ -47,12 +49,26 @@ class AgentConfig:
     agent_id: str
     agent_type: str
     capabilities: List[AgentCapability]
-    max_concurrent_tasks: int = 5
-    llm_model: str = "gpt-4"
-    temperature: float = 0.7
-    max_tokens: int = 4000
-    timeout: int = 300
+    max_concurrent_tasks: int = None
+    llm_model: str = None
+    temperature: float = None
+    max_tokens: int = None
+    timeout: int = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        """Set defaults from global config if not provided."""
+        from ..config.settings import settings
+        if self.max_concurrent_tasks is None:
+            self.max_concurrent_tasks = settings.agent.max_concurrent_tasks
+        if self.llm_model is None:
+            self.llm_model = settings.llm.default_model
+        if self.temperature is None:
+            self.temperature = settings.llm.temperature
+        if self.max_tokens is None:
+            self.max_tokens = settings.llm.max_tokens
+        if self.timeout is None:
+            self.timeout = settings.llm.timeout
 
 
 class BaseAgent(ABC):

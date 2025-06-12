@@ -73,15 +73,15 @@ class SupervisorAgent:
         """Create LLM instance based on configuration."""
         if hasattr(settings, 'llm') and hasattr(settings.llm, 'anthropic_api_key') and settings.llm.anthropic_api_key:
             return ChatAnthropic(
-                model="claude-3-5-sonnet-20240620",
-                temperature=0.3,
+                model=settings.llm.default_model,
+                temperature=settings.llm.temperature,
                 api_key=settings.llm.anthropic_api_key
             )
         else:
             # Fallback to Anthropic with environment variable
             return ChatAnthropic(
-                model="claude-3-5-sonnet-20240620",
-                temperature=0.3
+                model=settings.llm.default_model,
+                temperature=settings.llm.temperature
             )
     
     def _build_graph(self) -> StateGraph:

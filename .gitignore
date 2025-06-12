@@ -199,3 +199,4 @@ generated_apps/
 build_output/
 
 *.pdf
+.dart_tool/*

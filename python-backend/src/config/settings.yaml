@@ -1,0 +1,84 @@
+# FlutterSwarm Main Settings Configuration
+application:
+  log_level: "INFO"
+  debug: false
+  environment: "development"
+
+# LLM Configuration
+llm:
+  default_model: "claude-3-5-sonnet-20240620"
+  max_tokens: 4000
+  temperature: 0.7
+  timeout: 30
+  max_retries: 3
+  rate_limit: 60
+
+# Database Configuration  
+database:
+  url: "postgresql://user:pass@localhost/flutterswarm"
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+
+# Redis Configuration
+redis:
+  url: "redis://localhost:6379"
+  max_connections: 20
+  retry_on_timeout: true
+  ttl_seconds: 604800  # 7 days
+  max_versions: 10
+
+# Agent System Configuration
+agent:
+  memory_ttl: 3600  # seconds
+  max_memory_entries: 1000
+  context_window_size: 8000
+  max_concurrent_tasks: 5
+  task_timeout: 300  # seconds
+  memory_retention_hours: 24
+  importance_threshold: 0.5
+  max_load_capacity: 5
+
+# Event Bus Configuration
+event_bus:
+  buffer_size: 1000
+  max_subscribers: 100
+  message_ttl: 3600  # seconds
+  max_history: 1000
+  max_retry_attempts: 3
+
+# Flutter Configuration
+flutter:
+  output_directory: "flutter_projects"
+  default_flutter_version: "3.24.0"
+  default_dart_version: "3.5.0"
+
+# Task Configuration
+task:
+  estimated_duration: 300  # seconds
+  timeout: 600  # seconds
+  max_retries: 3
+
+# Memory Manager Configuration
+memory:
+  embedding_dim: 1536
+  similarity_threshold: 0.7
+  max_context_tokens: 2000
+  text_search_limit: 10
+
+# Error Recovery Configuration
+error_recovery:
+  max_retries: 3
+  failure_threshold: 5
+  circuit_breaker_timeout: 60.0
+
+# Checkpointer Configuration
+checkpointer:
+  max_checkpoints: 100
+  cleanup_older_than_days: 7
+
+# Performance Thresholds
+performance:
+  success_rate_threshold: 80
+  phrase_boost_factor: 1.5
+  metadata_boost_factor: 1.2

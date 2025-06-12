@@ -33,12 +33,20 @@ class LLMRequest:
     """Request structure for LLM calls."""
     prompt: str
     model: str
-    temperature: float = 0.7
-    max_tokens: int = 4000
+    temperature: float = None
+    max_tokens: int = None
     system_prompt: Optional[str] = None
     context: Dict[str, Any] = None
     agent_id: str = ""
     correlation_id: str = ""
+    
+    def __post_init__(self):
+        """Set defaults from config if not provided."""
+        from ..config.settings import settings
+        if self.temperature is None:
+            self.temperature = settings.llm.temperature
+        if self.max_tokens is None:
+            self.max_tokens = settings.llm.max_tokens
 
 
 @dataclass
@@ -169,15 +177,15 @@ class LLMClient:
     async def generate(
         self,
         prompt: str,
-        model: str = "gpt-4",
-        temperature: float = 0.7,
-        max_tokens: int = 4000,
+        model: str = None,
+        temperature: float = None,
+        max_tokens: int = None,
         system_prompt: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
         agent_id: str = "",
         correlation_id: str = "",
         provider: Optional[str] = None,
-        retry_count: int = 3
+        retry_count: int = None
     ) -> str:
         """
         Generate text using the specified or default LLM provider.
@@ -187,16 +195,28 @@ class LLMClient:
             model: Model name to use
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
-            system_prompt: Optional system prompt
-            context: Additional context information
-            agent_id: ID of the requesting agent
-            correlation_id: Correlation ID for tracking
-            provider: Specific provider to use (optional)
+            system_prompt: System prompt for context
+            context: Additional context for the request
+            agent_id: ID of requesting agent
+            correlation_id: Request correlation ID
+            provider: LLM provider to use
             retry_count: Number of retries on failure
             
         Returns:
             Generated text response
         """
+        from ..config.settings import settings
+        
+        # Use config defaults if not provided
+        if model is None:
+            model = settings.llm.default_model
+        if temperature is None:
+            temperature = settings.llm.temperature
+        if max_tokens is None:
+            max_tokens = settings.llm.max_tokens
+        if retry_count is None:
+            retry_count = settings.llm.max_retries
+        
         request = LLMRequest(
             prompt=prompt,
             model=model,

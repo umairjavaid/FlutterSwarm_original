@@ -16,13 +16,27 @@ from .settings import settings
 class LangGraphAgentModelConfig:
     """Configuration for LangGraph agent LLM model settings."""
     provider: str = "anthropic"  # anthropic, local
-    model: str = "claude-3-5-sonnet-20240620"
-    temperature: float = 0.7
-    max_tokens: int = 4000
-    timeout: int = 300
-    max_retries: int = 3
+    model: str = None  # Will be set from config
+    temperature: float = None  # Will be set from config
+    max_tokens: int = None  # Will be set from config
+    timeout: int = None  # Will be set from config
+    max_retries: int = None  # Will be set from config
     fallback_provider: Optional[str] = None
     fallback_model: Optional[str] = None
+    
+    def __post_init__(self):
+        """Set defaults from global config if not provided."""
+        from .settings import settings
+        if self.model is None:
+            self.model = settings.llm.default_model
+        if self.temperature is None:
+            self.temperature = settings.llm.temperature
+        if self.max_tokens is None:
+            self.max_tokens = settings.llm.max_tokens
+        if self.timeout is None:
+            self.timeout = settings.llm.timeout
+        if self.max_retries is None:
+            self.max_retries = settings.llm.max_retries
 
 
 @dataclass
@@ -38,13 +52,25 @@ class LangGraphAgentPromptConfig:
 @dataclass
 class LangGraphAgentBehaviorConfig:
     """Configuration for agent behavior and operational parameters."""
-    max_concurrent_tasks: int = 5
-    task_timeout: int = 600
+    max_concurrent_tasks: int = None
+    task_timeout: int = None
     auto_retry_failed_tasks: bool = True
     enable_collaboration: bool = True
     enable_learning: bool = True
-    memory_retention_hours: int = 24
-    importance_threshold: float = 0.5
+    memory_retention_hours: int = None
+    importance_threshold: float = None
+    
+    def __post_init__(self):
+        """Set defaults from global config if not provided."""
+        from .settings import settings
+        if self.max_concurrent_tasks is None:
+            self.max_concurrent_tasks = settings.agent.max_concurrent_tasks
+        if self.task_timeout is None:
+            self.task_timeout = settings.agent.task_timeout
+        if self.memory_retention_hours is None:
+            self.memory_retention_hours = settings.agent.memory_retention_hours
+        if self.importance_threshold is None:
+            self.importance_threshold = settings.agent.importance_threshold
 
 
 @dataclass
@@ -109,11 +135,11 @@ class LangGraphAgentConfigManager:
         model_config_data = config_data.get("model_config", {})
         model_config = LangGraphAgentModelConfig(
             provider=model_config_data.get("provider", "anthropic"),
-            model=model_config_data.get("model", "claude-3-5-sonnet-20240620"),
-            temperature=model_config_data.get("temperature", 0.7),
-            max_tokens=model_config_data.get("max_tokens", 4000),
-            timeout=model_config_data.get("timeout", 300),
-            max_retries=model_config_data.get("max_retries", 3),
+            model=model_config_data.get("model"),  # Will use config default if None
+            temperature=model_config_data.get("temperature"),  # Will use config default if None
+            max_tokens=model_config_data.get("max_tokens"),  # Will use config default if None
+            timeout=model_config_data.get("timeout"),  # Will use config default if None
+            max_retries=model_config_data.get("max_retries"),  # Will use config default if None
             fallback_provider=model_config_data.get("fallback_provider"),
             fallback_model=model_config_data.get("fallback_model")
         )
@@ -129,13 +155,13 @@ class LangGraphAgentConfigManager:
         
         behavior_config_data = config_data.get("behavior_config", {})
         behavior_config = LangGraphAgentBehaviorConfig(
-            max_concurrent_tasks=behavior_config_data.get("max_concurrent_tasks", 5),
-            task_timeout=behavior_config_data.get("task_timeout", 600),
+            max_concurrent_tasks=behavior_config_data.get("max_concurrent_tasks"),  # Will use config default if None
+            task_timeout=behavior_config_data.get("task_timeout"),  # Will use config default if None
             auto_retry_failed_tasks=behavior_config_data.get("auto_retry_failed_tasks", True),
             enable_collaboration=behavior_config_data.get("enable_collaboration", True),
             enable_learning=behavior_config_data.get("enable_learning", True),
-            memory_retention_hours=behavior_config_data.get("memory_retention_hours", 24),
-            importance_threshold=behavior_config_data.get("importance_threshold", 0.5)
+            memory_retention_hours=behavior_config_data.get("memory_retention_hours"),  # Will use config default if None
+            importance_threshold=behavior_config_data.get("importance_threshold")  # Will use config default if None
         )
         
         return LangGraphAgentConfig(
@@ -151,46 +177,48 @@ class LangGraphAgentConfigManager:
     
     def _create_default_config(self, agent_type: str) -> LangGraphAgentConfig:
         """Create default configuration for an agent type."""
-        # Agent-specific defaults
+        from .settings import settings
+        
+        # Agent-specific defaults that can override global defaults
         agent_defaults = {
             "orchestrator": {
                 "temperature": 0.3,
-                "max_tokens": 3000,
+                "max_tokens": settings.llm.max_tokens * 0.75,  # 75% of default
                 "capabilities": ["task_decomposition", "workflow_management", "agent_coordination"]
             },
             "architecture": {
                 "temperature": 0.3,
-                "max_tokens": 6000,
+                "max_tokens": settings.llm.max_tokens * 1.5,  # 150% of default
                 "capabilities": ["architecture_analysis", "design_patterns", "project_structure"]
             },
             "implementation": {
                 "temperature": 0.2,
-                "max_tokens": 8000,
+                "max_tokens": settings.llm.max_tokens * 2,  # 200% of default
                 "capabilities": ["code_generation", "feature_development", "ui_implementation"]
             },
             "testing": {
                 "temperature": 0.3,
-                "max_tokens": 6000,
+                "max_tokens": settings.llm.max_tokens * 1.5,  # 150% of default
                 "capabilities": ["test_generation", "quality_assurance", "test_automation"]
             },
             "security": {
                 "temperature": 0.2,
-                "max_tokens": 7000,
+                "max_tokens": settings.llm.max_tokens * 1.75,  # 175% of default
                 "capabilities": ["security_analysis", "vulnerability_assessment", "compliance"]
             },
             "devops": {
                 "temperature": 0.3,
-                "max_tokens": 7000,
+                "max_tokens": settings.llm.max_tokens * 1.75,  # 175% of default
                 "capabilities": ["deployment_automation", "ci_cd_setup", "infrastructure"]
             },
             "documentation": {
                 "temperature": 0.4,
-                "max_tokens": 8000,
+                "max_tokens": settings.llm.max_tokens * 2,  # 200% of default
                 "capabilities": ["documentation_generation", "api_docs", "user_guides"]
             },
             "performance": {
                 "temperature": 0.3,
-                "max_tokens": 7000,
+                "max_tokens": settings.llm.max_tokens * 1.75,  # 175% of default
                 "capabilities": ["performance_analysis", "optimization", "monitoring"]
             }
         }
@@ -198,8 +226,8 @@ class LangGraphAgentConfigManager:
         defaults = agent_defaults.get(agent_type, {})
         
         model_config = LangGraphAgentModelConfig(
-            temperature=defaults.get("temperature", 0.7),
-            max_tokens=defaults.get("max_tokens", 4000)
+            temperature=defaults.get("temperature"),  # Will use global default if None
+            max_tokens=int(defaults.get("max_tokens", settings.llm.max_tokens))
         )
         
         prompt_config = LangGraphAgentPromptConfig(

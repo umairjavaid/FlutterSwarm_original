@@ -76,7 +76,7 @@ class EventBus:
         metrics: Health and delivery metrics
     """
     
-    def __init__(self, max_history: int = 1000, max_retry_attempts: int = 3):
+    def __init__(self, max_history: int = None, max_retry_attempts: int = None):
         """
         Initialize the event bus.
         
@@ -84,6 +84,13 @@ class EventBus:
             max_history: Maximum number of events to keep in history
             max_retry_attempts: Maximum retry attempts for failed deliveries
         """
+        from ..config import settings
+        
+        # Use config values if not explicitly provided
+        if max_history is None:
+            max_history = settings.event_bus.max_history
+        if max_retry_attempts is None:
+            max_retry_attempts = settings.event_bus.max_retry_attempts
         self.subscriptions: Dict[str, List[EventSubscription]] = defaultdict(list)
         self.pattern_subscriptions: Dict[str, List[EventSubscription]] = defaultdict(list)
         self.message_queue: asyncio.Queue = asyncio.Queue()
@@ -428,10 +435,10 @@ class EventBus:
                 return False
             
             # Check queue sizes
-            if self.message_queue.qsize() > 1000:
+            if self.message_queue.qsize() > self.max_history:
                 logger.warning("Message queue is getting large")
             
-            if self.dead_letter_queue.qsize() > 100:
+            if self.dead_letter_queue.qsize() > (self.max_history // 10):  # 10% of max history
                 logger.warning("Dead letter queue has many failed messages")
             
             return True

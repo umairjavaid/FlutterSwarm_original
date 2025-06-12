@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
 from collections import defaultdict
 
+from ..config import settings
+
 from ..models import MemoryEntry
 from ..config import get_logger, settings
 
@@ -156,7 +158,7 @@ class MemoryManager:
                 consolidated_content = await self.llm_client.generate(
                     prompt=consolidation_prompt,
                     temperature=0.3,
-                    max_tokens=1000,
+                    max_tokens=settings.llm.max_tokens // 4,  # Use quarter of max tokens for consolidation
                     agent_id=self.agent_id,
                     correlation_id=correlation_id
                 )

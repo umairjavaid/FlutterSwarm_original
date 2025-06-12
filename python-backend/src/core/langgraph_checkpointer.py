@@ -27,10 +27,10 @@ class RedisCheckpointSaver(BaseCheckpointSaver):
     
     def __init__(
         self,
-        redis_url: str = "redis://localhost:6379",
+        redis_url: str = None,
         key_prefix: str = "flutterswarm:checkpoint:",
-        ttl_seconds: int = 86400 * 7,  # 7 days
-        max_versions: int = 10
+        ttl_seconds: int = None,
+        max_versions: int = None
     ):
         """
         Initialize Redis checkpoint saver.
@@ -41,11 +41,14 @@ class RedisCheckpointSaver(BaseCheckpointSaver):
             ttl_seconds: Time-to-live for checkpoints
             max_versions: Maximum versions to keep per thread
         """
+        from ..config import settings
+        
         super().__init__()
-        self.redis_url = redis_url
+        # Use config values if not explicitly provided
+        self.redis_url = redis_url or settings.redis.url
         self.key_prefix = key_prefix
-        self.ttl_seconds = ttl_seconds
-        self.max_versions = max_versions
+        self.ttl_seconds = ttl_seconds or settings.redis.ttl_seconds
+        self.max_versions = max_versions or settings.redis.max_versions
         self._redis: Optional[redis.Redis] = None
     
     async def _get_redis(self) -> redis.Redis:
@@ -281,8 +284,9 @@ def create_checkpointer(
         )
     
     elif backend == "redis":
+        from ..config import settings
         if not redis_url:
-            redis_url = "redis://localhost:6379"
+            redis_url = settings.redis.url
         
         return RedisCheckpointSaver(
             redis_url=redis_url,
