@@ -6,19 +6,24 @@ to perform Flutter-specific operations through structured tool interface.
 """
 
 import asyncio
+import glob
 import json
 import logging
 import os
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
+import uuid
+import yaml
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .base_tool import (
     BaseTool, ToolCapabilities, ToolOperation, ToolPermission, 
-    ToolResult, ToolStatus
+    ToolResult, ToolStatus, ToolCategory
 )
 
 logger = logging.getLogger(__name__)
@@ -105,29 +110,314 @@ class FlutterSDKTool(BaseTool):
         operations = [
             {
                 "name": "create_project",
-                "description": "Create a new Flutter project",
-                "parameters_schema": {"type": "object", "properties": {"project_name": {"type": "string"}}},
-                "required_permissions": [ToolPermission.FILE_CREATE]
+                "description": "Create a new Flutter project with customizable templates and platform support",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "project_name": {"type": "string", "description": "Name of the Flutter project"},
+                        "output_directory": {"type": "string", "description": "Directory where project will be created"},
+                        "template": {"type": "string", "enum": ["app", "package", "plugin", "module"], "default": "app"},
+                        "org": {"type": "string", "default": "com.example", "description": "Organization identifier"},
+                        "description": {"type": "string", "description": "Project description"},
+                        "platforms": {"type": "array", "items": {"type": "string", "enum": ["android", "ios", "web", "windows", "macos", "linux"]}},
+                        "offline": {"type": "boolean", "default": False},
+                        "pub": {"type": "boolean", "default": True}
+                    },
+                    "required": ["project_name", "output_directory"]
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {
+                        "project_path": {"type": "string"},
+                        "project_config": {"type": "object"},
+                        "created_files": {"type": "array"},
+                        "next_steps": {"type": "array"}
+                    }
+                },
+                "required_permissions": [ToolPermission.FILE_CREATE, ToolPermission.DIRECTORY_CREATE],
+                "examples": ["Create new Flutter app", "Create Flutter package", "Create plugin"],
+                "error_codes": ["DIRECTORY_EXISTS", "INVALID_PROJECT_NAME", "FLUTTER_NOT_FOUND"],
+                "estimated_duration": 30,
+                "supports_cancellation": True
             },
             {
-                "name": "build_app", 
-                "description": "Build Flutter application",
-                "parameters_schema": {"type": "object", "properties": {"project_path": {"type": "string"}}},
-                "required_permissions": [ToolPermission.PROCESS_SPAWN]
+                "name": "add_platform",
+                "description": "Add platform support to existing Flutter project",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "project_path": {"type": "string", "description": "Path to existing Flutter project"},
+                        "platforms": {"type": "array", "items": {"type": "string", "enum": ["android", "ios", "web", "windows", "macos", "linux"]}}
+                    },
+                    "required": ["project_path", "platforms"]
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {
+                        "added_platforms": {"type": "array"},
+                        "configuration_files": {"type": "array"},
+                        "required_setup": {"type": "array"}
+                    }
+                },
+                "required_permissions": [ToolPermission.FILE_WRITE, ToolPermission.DIRECTORY_CREATE],
+                "examples": ["Add web support", "Add desktop platforms", "Multi-platform setup"],
+                "error_codes": ["PROJECT_NOT_FOUND", "PLATFORM_ALREADY_EXISTS", "PLATFORM_NOT_SUPPORTED"],
+                "estimated_duration": 15,
+                "supports_cancellation": True
+            },
+            {
+                "name": "build_app",
+                "description": "Build Flutter application for specific platform with advanced configuration",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "project_path": {"type": "string", "description": "Path to Flutter project"},
+                        "platform": {"type": "string", "enum": ["android", "ios", "web", "windows", "macos", "linux"]},
+                        "build_mode": {"type": "string", "enum": ["debug", "profile", "release"], "default": "debug"},
+                        "target_file": {"type": "string", "description": "Target Dart file to build"},
+                        "build_name": {"type": "string", "description": "Build name version"},
+                        "build_number": {"type": "string", "description": "Build number"},
+                        "flavor": {"type": "string", "description": "Product flavor"},
+                        "dart_defines": {"type": "object", "description": "Dart compile-time variables"},
+                        "obfuscate": {"type": "boolean", "default": False},
+                        "split_debug_info": {"type": "string", "description": "Directory for debug info"}
+                    },
+                    "required": ["project_path", "platform"]
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {
+                        "build_output": {"type": "string"},
+                        "artifacts": {"type": "array"},
+                        "build_time": {"type": "number"},
+                        "warnings": {"type": "array"},
+                        "size_analysis": {"type": "object"}
+                    }
+                },
+                "required_permissions": [ToolPermission.PROCESS_SPAWN, ToolPermission.FILE_READ],
+                "examples": ["Build release APK", "Build iOS app", "Build web app"],
+                "error_codes": ["BUILD_FAILED", "PLATFORM_NOT_SUPPORTED", "PROJECT_NOT_FOUND"],
+                "estimated_duration": 180,
+                "supports_cancellation": True
             },
             {
                 "name": "run_app",
-                "description": "Run Flutter application", 
-                "parameters_schema": {"type": "object", "properties": {"project_path": {"type": "string"}}},
-                "required_permissions": [ToolPermission.PROCESS_SPAWN]
+                "description": "Run Flutter application on device/emulator with hot reload support",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "project_path": {"type": "string", "description": "Path to Flutter project"},
+                        "device_id": {"type": "string", "description": "Target device ID"},
+                        "platform": {"type": "string", "enum": ["android", "ios", "web", "windows", "macos", "linux"]},
+                        "build_mode": {"type": "string", "enum": ["debug", "profile", "release"], "default": "debug"},
+                        "target_file": {"type": "string", "description": "Target Dart file to run"},
+                        "dart_defines": {"type": "object", "description": "Dart compile-time variables"},
+                        "web_port": {"type": "integer", "description": "Web server port"},
+                        "web_hostname": {"type": "string", "description": "Web server hostname"},
+                        "enable_software_rendering": {"type": "boolean", "default": False}
+                    },
+                    "required": ["project_path"]
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {
+                        "process_id": {"type": "string"},
+                        "device_info": {"type": "object"},
+                        "app_url": {"type": "string"},
+                        "debug_url": {"type": "string"},
+                        "hot_reload_enabled": {"type": "boolean"}
+                    }
+                },
+                "required_permissions": [ToolPermission.PROCESS_SPAWN, ToolPermission.NETWORK_ACCESS],
+                "examples": ["Run on emulator", "Run on physical device", "Run web app"],
+                "error_codes": ["RUN_FAILED", "DEVICE_NOT_FOUND", "PROJECT_NOT_FOUND"],
+                "estimated_duration": 60,
+                "supports_cancellation": True
+            },
+            {
+                "name": "test_app",
+                "description": "Run Flutter tests with coverage reporting and filtering options",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "project_path": {"type": "string", "description": "Path to Flutter project"},
+                        "test_type": {"type": "string", "enum": ["all", "unit", "widget", "integration"], "default": "all"},
+                        "test_files": {"type": "array", "items": {"type": "string"}, "description": "Specific test files to run"},
+                        "coverage": {"type": "boolean", "default": False, "description": "Generate coverage report"},
+                        "coverage_path": {"type": "string", "description": "Custom coverage output path"},
+                        "reporter": {"type": "string", "enum": ["compact", "expanded", "json"], "default": "compact"},
+                        "concurrency": {"type": "integer", "minimum": 1, "maximum": 32, "default": 4},
+                        "update_goldens": {"type": "boolean", "default": False}
+                    },
+                    "required": ["project_path"]
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {
+                        "test_results": {"type": "object"},
+                        "coverage_report": {"type": "object"},
+                        "failed_tests": {"type": "array"},
+                        "execution_time": {"type": "number"},
+                        "test_files_run": {"type": "array"}
+                    }
+                },
+                "required_permissions": [ToolPermission.PROCESS_SPAWN, ToolPermission.FILE_READ],
+                "examples": ["Run unit tests", "Generate coverage report", "Run specific test files"],
+                "error_codes": ["TEST_FAILED", "PROJECT_NOT_FOUND", "NO_TESTS_FOUND"],
+                "estimated_duration": 120,
+                "supports_cancellation": True
+            },
+            {
+                "name": "analyze_code",
+                "description": "Analyze and format Flutter/Dart code with detailed results",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "project_path": {"type": "string", "description": "Path to Flutter project"},
+                        "fix": {"type": "boolean", "default": False, "description": "Apply automatic fixes"},
+                        "format": {"type": "boolean", "default": False, "description": "Format code"},
+                        "line_length": {"type": "integer", "minimum": 40, "maximum": 200, "default": 80},
+                        "files": {"type": "array", "items": {"type": "string"}, "description": "Specific files to analyze"}
+                    },
+                    "required": ["project_path"]
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {
+                        "analysis_results": {"type": "object"},
+                        "issues": {"type": "array"},
+                        "formatted_files": {"type": "array"},
+                        "fixed_issues": {"type": "array"}
+                    }
+                },
+                "required_permissions": [ToolPermission.PROCESS_SPAWN, ToolPermission.FILE_WRITE],
+                "examples": ["Analyze project", "Format code", "Fix issues automatically"],
+                "error_codes": ["ANALYSIS_FAILED", "PROJECT_NOT_FOUND", "FORMAT_FAILED"],
+                "estimated_duration": 45,
+                "supports_cancellation": True
+            },
+            {
+                "name": "pub_operations",
+                "description": "Handle Flutter pub package management operations",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "project_path": {"type": "string", "description": "Path to Flutter project"},
+                        "operation": {"type": "string", "enum": ["get", "upgrade", "outdated", "add", "remove"], "description": "Pub operation to perform"},
+                        "package_name": {"type": "string", "description": "Package name for add/remove operations"},
+                        "version_constraint": {"type": "string", "description": "Version constraint for packages"},
+                        "dev_dependency": {"type": "boolean", "default": False, "description": "Add as dev dependency"},
+                        "offline": {"type": "boolean", "default": False, "description": "Use offline mode"},
+                        "dry_run": {"type": "boolean", "default": False, "description": "Perform dry run"}
+                    },
+                    "required": ["project_path", "operation"]
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {
+                        "operation_result": {"type": "object"},
+                        "updated_dependencies": {"type": "array"},
+                        "conflicts": {"type": "array"},
+                        "pubspec_changes": {"type": "object"}
+                    }
+                },
+                "required_permissions": [ToolPermission.PROCESS_SPAWN, ToolPermission.FILE_WRITE, ToolPermission.NETWORK_ACCESS],
+                "examples": ["Get dependencies", "Add package", "Upgrade packages", "Check outdated"],
+                "error_codes": ["PUB_FAILED", "DEPENDENCY_CONFLICT", "PACKAGE_NOT_FOUND", "PROJECT_NOT_FOUND"],
+                "estimated_duration": 90,
+                "supports_cancellation": True
+            },
+            {
+                "name": "clean_project",
+                "description": "Clean Flutter project build artifacts with selective options",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "project_path": {"type": "string", "description": "Path to Flutter project"},
+                        "deep_clean": {"type": "boolean", "default": False, "description": "Perform deep clean including caches"}
+                    },
+                    "required": ["project_path"]
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {
+                        "cleaned_directories": {"type": "array"},
+                        "space_freed": {"type": "string"},
+                        "cache_cleared": {"type": "boolean"}
+                    }
+                },
+                "required_permissions": [ToolPermission.PROCESS_SPAWN, ToolPermission.FILE_DELETE],
+                "examples": ["Clean build artifacts", "Deep clean with caches", "Free disk space"],
+                "error_codes": ["CLEAN_FAILED", "PROJECT_NOT_FOUND", "PERMISSION_DENIED"],
+                "estimated_duration": 30,
+                "supports_cancellation": True
+            },
+            {
+                "name": "doctor",
+                "description": "Check Flutter environment health with detailed diagnostics",
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "verbose": {"type": "boolean", "default": False, "description": "Show verbose output"},
+                        "android_licenses": {"type": "boolean", "default": False, "description": "Check Android licenses"}
+                    }
+                },
+                "output_schema": {
+                    "type": "object",
+                    "properties": {
+                        "flutter_version": {"type": "string"},
+                        "dart_version": {"type": "string"},
+                        "platform_status": {"type": "object"},
+                        "issues": {"type": "array"},
+                        "environment_vars": {"type": "object"},
+                        "connected_devices": {"type": "array"}
+                    }
+                },
+                "required_permissions": [ToolPermission.PROCESS_SPAWN, ToolPermission.SYSTEM_INFO],
+                "examples": ["Check environment", "Validate setup", "List devices"],
+                "error_codes": ["DOCTOR_FAILED", "PERMISSION_DENIED"],
+                "estimated_duration": 20,
+                "supports_cancellation": True
             }
         ]
         
+        input_schemas = {}
+        output_schemas = {}
+        error_codes = {}
+        
+        for op in operations:
+            input_schemas[op["name"]] = op["parameters_schema"]
+            output_schemas[op["name"]] = op["output_schema"]
+            for code in op["error_codes"]:
+                error_codes[code] = f"Error in {op['name']} operation"
+        
         return ToolCapabilities(
             available_operations=operations,
-            supported_contexts=["flutter_project"],
-            performance_characteristics={"avg_response_time": "2000ms"},
-            limitations=["Requires Flutter SDK installed"]
+            input_schemas=input_schemas,
+            output_schemas=output_schemas,
+            error_codes=error_codes,
+            resource_requirements={
+                "cpu": "medium",
+                "memory": "256MB",
+                "disk": "1GB",
+                "network": "optional"
+            },
+            constraints=[
+                "Requires Flutter SDK installed",
+                "Requires appropriate platform SDKs for target platforms",
+                "Device/emulator required for run operations"
+            ],
+            supported_contexts=["flutter_project", "development_environment"],
+            performance_characteristics={
+                "avg_response_time": "2000ms",
+                "build_time": "30-300s",
+                "memory_usage": "high_during_builds"
+            },
+            limitations=[
+                "Platform builds require platform-specific setup",
+                "iOS builds require macOS",
+                "Some operations require device/emulator connection"
+            ]
         )
     
     async def validate_params(
@@ -158,19 +448,34 @@ class FlutterSDKTool(BaseTool):
             return self._validate_build_params(params)
         elif operation in ["run_app", "test_app", "analyze_code", "clean_project"]:
             return self._validate_project_path(params.get("project_path"))
+        elif operation == "add_platform":
+            project_valid, error = self._validate_project_path(params.get("project_path"))
+            return project_valid, error
         elif operation == "pub_operations":
             return self._validate_pub_params(params)
+        elif operation == "doctor":
+            # Doctor doesn't require project path
+            return True, None
         
         return True, None
     
     def _validate_create_project_params(self, params: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         """Validate create_project parameters."""
         project_name = params.get("project_name", "")
-        if not project_name.replace("_", "").replace("-", "").isalnum():
-            return False, "Project name must contain only letters, numbers, underscores, and hyphens"
         
-        if project_name.startswith("-") or project_name.startswith("_"):
-            return False, "Project name cannot start with hyphen or underscore"
+        # Check if project name is valid
+        if not project_name:
+            return False, "Project name is required"
+        
+        # Check for invalid characters (only letters, numbers, underscores allowed)
+        import re
+        if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', project_name):
+            return False, "Project name must start with a letter and contain only letters, numbers, and underscores"
+        
+        # Check for reserved words
+        reserved_words = ['flutter', 'dart', 'test', 'integration_test']
+        if project_name.lower() in reserved_words:
+            return False, f"Project name '{project_name}' is reserved"
         
         output_dir = params.get("output_directory")
         if output_dir and not os.path.exists(output_dir):
@@ -1317,3 +1622,101 @@ class FlutterSDKTool(BaseTool):
                 return False
         
         return False
+    
+    def _create_success_result(
+        self,
+        operation: str,
+        data: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        operation_id: Optional[str] = None
+    ) -> ToolResult:
+        """Create a successful tool result."""
+        return ToolResult(
+            operation_id=operation_id or str(uuid.uuid4()),
+            status=ToolStatus.SUCCESS,
+            data=data,
+            metadata=metadata or {}
+        )
+    
+    def _create_error_result(
+        self,
+        operation: str,
+        error_message: str,
+        error_code: str,
+        operation_id: Optional[str] = None
+    ) -> ToolResult:
+        """Create an error tool result."""
+        return ToolResult(
+            operation_id=operation_id or str(uuid.uuid4()),
+            status=ToolStatus.FAILURE,
+            error_message=error_message,
+            metadata={"error_code": error_code, "operation": operation}
+        )
+    
+    def _create_partial_success_result(
+        self,
+        operation: str,
+        data: Any = None,
+        warnings: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        operation_id: Optional[str] = None
+    ) -> ToolResult:
+        """Create a partial success tool result."""
+        return ToolResult(
+            operation_id=operation_id or str(uuid.uuid4()),
+            status=ToolStatus.PARTIAL_SUCCESS,
+            data=data,
+            warnings=warnings or [],
+            metadata=metadata or {}
+        )
+
+    def _validate_common_params(self, params: Dict[str, Any], required_params: List[str]) -> Tuple[bool, Optional[str]]:
+        """Validate common parameters across operations."""
+        for param in required_params:
+            if param not in params:
+                return False, f"Missing required parameter: {param}"
+        return True, None
+    
+    def _calculate_directory_size(self, directory: str) -> int:
+        """Calculate total size of directory in bytes."""
+        total_size = 0
+        try:
+            for dirpath, dirnames, filenames in os.walk(directory):
+                for filename in filenames:
+                    filepath = os.path.join(dirpath, filename)
+                    if os.path.exists(filepath):
+                        total_size += os.path.getsize(filepath)
+        except (OSError, IOError):
+            pass
+        return total_size
+
+    def _remove_directory_safely(self, directory: str) -> bool:
+        """Safely remove directory and its contents."""
+        try:
+            if os.path.exists(directory):
+                shutil.rmtree(directory)
+                return True
+        except (OSError, IOError) as e:
+            logger.warning(f"Could not remove directory {directory}: {e}")
+        return False
+
+    def _parse_lcov_file_section(self, file_section: str) -> Dict[str, Any]:
+        """Parse individual file section from LCOV coverage report."""
+        file_info = {'filename': '', 'lines_total': 0, 'lines_covered': 0}
+        
+        lines = file_section.split('\n')
+        for line in lines:
+            if line.startswith('SF:'):
+                file_info['filename'] = line[3:].strip()
+            elif line.startswith('LF:'):
+                file_info['lines_total'] = int(line[3:])
+            elif line.startswith('LH:'):
+                file_info['lines_covered'] = int(line[3:])
+        
+        # Calculate coverage percentage
+        if file_info['lines_total'] > 0:
+            file_info['coverage_percentage'] = (file_info['lines_covered'] / file_info['lines_total']) * 100
+        else:
+            file_info['coverage_percentage'] = 0
+            
+        return file_info
