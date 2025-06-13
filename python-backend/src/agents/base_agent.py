@@ -19,14 +19,15 @@ from ..core.exceptions import AgentError, LLMError
 
 from ..core.event_bus import EventBus
 from ..core.memory_manager import MemoryManager
-from ..models.agent_models import AgentMessage, AgentStatus, TaskResult
+from ..models.agent_models import AgentMessage, AgentStatus, TaskResult, MessageType
 from ..models.task_models import TaskContext
 from ..config.agent_configs import agent_config_manager
 from ..core.enhanced_logger import get_logger, log_operation, log_llm_interaction, log_performance_metrics
 from ..config import get_logger as get_config_logger
+from ..core.tools.base_tool import BaseTool
 from ..models.tool_models import (
-    BaseTool, ToolUsageEntry, ToolLearningModel, ToolMetrics, ToolUnderstanding,
-    ToolResult, ToolUsagePlan, ToolOperation, ToolDiscovery, TaskOutcome
+    ToolUsageEntry, ToolLearningModel, ToolMetrics, ToolUnderstanding,
+    ToolResult, ToolUsagePlan, ToolOperation, ToolDiscovery, TaskOutcome, ToolStatus
 )
 
 
@@ -61,6 +62,14 @@ class AgentConfig:
     max_tokens: int = None
     timeout: int = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    # Tool integration attributes
+    available_tools: Dict[str, Any] = field(default_factory=dict)
+    tool_capabilities: Dict[str, List[str]] = field(default_factory=dict)
+    tool_usage_history: List[Any] = field(default_factory=list)
+    tool_learning_model: Optional[Any] = None
+    tool_performance_metrics: Dict[str, Any] = field(default_factory=dict)
+    active_tool_operations: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
         """Set defaults from global config if not provided."""
@@ -143,13 +152,17 @@ class BaseAgent(ABC):
         # Register for relevant events
         asyncio.create_task(self._register_event_handlers())
         
-        # --- Tool-related attributes ---
-        self.available_tools: Dict[str, BaseTool] = {}
+        # --- Tool integration ---
+        self.tool_registry = None
+        self.available_tools: Dict[str, Any] = {}
         self.tool_capabilities: Dict[str, List[str]] = {}
         self.tool_usage_history: List[ToolUsageEntry] = []
-        self.tool_learning_model: ToolLearningModel = ToolLearningModel()
+        self.tool_learning_model: Optional[ToolLearningModel] = None
         self.tool_performance_metrics: Dict[str, ToolMetrics] = {}
-        self.active_tool_operations: Dict[str, Coroutine] = {}
+        self.active_tool_operations: Dict[str, asyncio.Task] = {}
+        
+        # Initialize tool system
+        asyncio.create_task(self._initialize_tool_system())
 
     async def _register_event_handlers(self) -> None:
         """Register event handlers for this agent."""
@@ -261,11 +274,14 @@ class BaseAgent(ABC):
             "If tool usage is needed, specify tool, operation, and parameters."
         )
         # 3. Call LLM
-        response = await super().execute_llm_task(
-            user_prompt=full_prompt,
-            context=context,
-            structured_output=True,
-            max_retries=max_retries
+        response = await self.llm_client.generate(
+            prompt=full_prompt,
+            model=self.config.llm_model,
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+            agent_id=self.agent_id,
+            structured_output=structured_output,
+            max_retries=max_retries or self.config.max_retries
         )
         # 4. Parse tool usage intentions
         tool_plan = response.get("tool_plan") if isinstance(response, dict) else None
@@ -583,143 +599,374 @@ Provide a detailed, actionable response with clear reasoning and specific implem
     
     # --- Tool Discovery and Understanding ---
 
+    async def _initialize_tool_system(self):
+        """Initialize the tool system for this agent."""
+        try:
+            from ..core.tools.tool_registry import ToolRegistry
+            self.tool_registry = ToolRegistry.instance()
+            
+            # Ensure registry is initialized
+            if not self.tool_registry.is_initialized:
+                await self.tool_registry.initialize()
+            
+            # Discover available tools
+            await self.discover_available_tools()
+            
+            logger.info(f"Tool system initialized for agent {self.agent_id}")
+        except Exception as e:
+            logger.error(f"Failed to initialize tool system: {e}")
+
     async def discover_available_tools(self) -> None:
         """
-        Discover and understand available tools:
-        1. Query tool registry for all registered tools
-        2. For each tool, call get_capabilities() and analyze
-        3. Use LLM to understand tool descriptions and capabilities
-        4. Store structured understanding in memory
-        5. Subscribe to tool availability changes
-        6. Build tool preference based on agent type
+        Discover and understand available tools.
+        
+        This method queries the tool registry, analyzes each tool's capabilities,
+        and builds the agent's understanding of what tools can do.
         """
-        # 1. Query tool registry (assume registry is available via event_bus or memory_manager)
-        tool_registry = await self.memory_manager.get_tool_registry()
-        for tool_name, tool in tool_registry.items():
-            self.available_tools[tool_name] = tool
-            # 2. Get capabilities
-            capabilities = await tool.get_capabilities()
-            self.tool_capabilities[tool_name] = capabilities
-            # 3. Analyze tool
-            understanding = await self.analyze_tool_capability(tool)
-            # 4. Store in memory
-            await self.memory_manager.store_memory(
-                content=f"Tool analyzed: {tool_name}",
-                metadata={"type": "tool_understanding", "tool": tool_name, "understanding": understanding},
-                importance=0.7
+        if not self.tool_registry:
+            logger.warning("Tool registry not available for tool discovery")
+            return
+        
+        try:
+            # Get all available tools
+            available_tools = self.tool_registry.get_available_tools()
+            
+            for tool in available_tools:
+                # Analyze tool capability
+                understanding = await self.analyze_tool_capability(tool)
+                
+                # Store tool information
+                self.available_tools[tool.name] = tool
+                self.tool_capabilities[tool.name] = understanding.usage_scenarios
+                
+                # Initialize performance metrics
+                self.tool_performance_metrics[tool.name] = ToolMetrics()
+                
+            logger.info(f"Discovered {len(self.available_tools)} tools for agent {self.agent_id}")
+            
+            # Share discovery insights with other agents
+            discovery_insight = ToolDiscovery(
+                agent_id=self.agent_id,
+                discovery_type="tool_discovery",
+                tool_names=list(self.available_tools.keys()),
+                description=f"Agent {self.agent_id} discovered {len(self.available_tools)} available tools",
+                confidence=0.9,
+                applicability=[self.config.agent_type]
             )
-        # 5. Subscribe to tool availability changes
-        await self.event_bus.subscribe("tool.availability", self._handle_tool_availability)
-        # 6. Build tool preference (simple: prefer tools matching agent_type)
-        self.tool_learning_model.build_preferences(self.agent_type, self.tool_capabilities)
+            
+            await self.share_tool_discovery(discovery_insight)
+            
+        except Exception as e:
+            logger.error(f"Tool discovery failed for agent {self.agent_id}: {e}")
 
     async def analyze_tool_capability(self, tool: BaseTool) -> ToolUnderstanding:
         """
-        Deep analysis of a tool's capabilities:
-        1. Parse capability description
-        2. Generate usage scenarios
-        3. Identify parameter patterns
-        4. Map to agent's responsibilities
-        5. Create mental model of tool usage
+        Deep analysis of a tool's capabilities through LLM reasoning.
+        
+        Args:
+            tool: Tool to analyze
+            
+        Returns:
+            ToolUnderstanding with structured analysis
         """
-        description = await tool.get_description()
-        capabilities = await tool.get_capabilities()
-        # Use LLM to analyze
-        prompt = (
-            f"Tool: {tool.name}\n"
-            f"Description: {description}\n"
-            f"Capabilities: {capabilities}\n"
-            "Analyze this tool for usage scenarios, parameter patterns, and mapping to agent responsibilities."
-        )
-        analysis = await self.execute_llm_task(prompt, context={"tool": tool.name}, include_tools=False)
-        return ToolUnderstanding.from_dict(analysis if isinstance(analysis, dict) else {})
+        try:
+            # Get tool capabilities
+            capabilities = await tool.get_capabilities()
+            usage_examples = await tool.get_usage_examples()
+            
+            # Convert capabilities to JSON-serializable format
+            def serialize_capabilities(caps):
+                """Convert capabilities to JSON-serializable format."""
+                try:
+                    serializable = {}
+                    for key, value in caps.__dict__.items():
+                        if hasattr(value, '__iter__') and not isinstance(value, str):
+                            # Handle lists/tuples that might contain enums or objects
+                            serializable[key] = []
+                            for item in value:
+                                if hasattr(item, 'value'):  # Enum
+                                    serializable[key].append(item.value)
+                                elif isinstance(item, dict):
+                                    # Handle nested dicts (like operations)
+                                    serialized_item = {}
+                                    for k, v in item.items():
+                                        if k == 'required_permissions' and hasattr(v, '__iter__'):
+                                            # Handle permissions list - ensure we get the value from enums
+                                            try:
+                                                serialized_item[k] = [
+                                                    getattr(p, 'value', str(p)) for p in v
+                                                ]
+                                            except (AttributeError, TypeError):
+                                                # Fallback if serialization fails
+                                                serialized_item[k] = [str(p) for p in v]
+                                        elif hasattr(v, 'value'):  # Enum
+                                            serialized_item[k] = v.value
+                                        else:
+                                            serialized_item[k] = v
+                                    serializable[key].append(serialized_item)
+                                else:
+                                    # For other types, try to convert to string if needed
+                                    try:
+                                        serializable[key].append(item)
+                                    except (TypeError, AttributeError):
+                                        serializable[key].append(str(item))
+                        elif hasattr(value, 'value'):  # Enum
+                            serializable[key] = value.value
+                        else:
+                            serializable[key] = value
+                    return serializable
+                except Exception as e:
+                    logger.warning(f"Failed to serialize capabilities, using basic info: {e}")
+                    return {
+                        "tool_name": getattr(caps, 'name', 'unknown'),
+                        "available_operations": [],
+                        "error": f"Serialization failed: {str(e)}"
+                    }
+
+            serializable_capabilities = serialize_capabilities(capabilities)
+            
+            # Use LLM to understand the tool
+            analysis_prompt = f"""
+            Analyze this tool and understand its capabilities:
+            
+            Tool Name: {tool.name}
+            Description: {tool.description}
+            Version: {tool.version}
+            Category: {tool.category.value}
+            
+            Capabilities:
+            {json.dumps(serializable_capabilities.get('available_operations', [])[:5], indent=2)}  # First 5 operations
+            
+            Usage Examples:
+            {json.dumps(usage_examples[:3], indent=2)}  # First 3 examples
+            
+            Provide analysis including:
+            1. Summary of what this tool does
+            2. When to use this tool (usage scenarios)
+            3. What parameters it typically needs
+            4. What success looks like
+            5. Common failure patterns to watch for
+            6. How this tool relates to my role as a {self.config.agent_type} agent
+            
+            Format response as structured data.
+            """
+            
+            analysis_result = await self.execute_llm_task(
+                user_prompt=analysis_prompt,
+                context={
+                    "tool_name": tool.name,
+                    "agent_type": self.config.agent_type,
+                    "capabilities": serializable_capabilities
+                }
+            )
+            
+            # Create tool understanding
+            understanding = ToolUnderstanding(
+                tool_name=tool.name,
+                agent_id=self.agent_id,
+                capability_summary=analysis_result.get("summary", ""),
+                usage_scenarios=analysis_result.get("usage_scenarios", []),
+                parameter_patterns=analysis_result.get("parameter_patterns", {}),
+                success_indicators=analysis_result.get("success_indicators", []),
+                failure_patterns=analysis_result.get("failure_patterns", []),
+                confidence_level=0.8
+            )
+            
+            # Store in memory for future reference
+            await self.memory_manager.store_memory(
+                content=f"Tool analysis: {tool.name} - {understanding.capability_summary}",
+                metadata={
+                    "type": "tool_understanding",
+                    "tool_name": tool.name,
+                    "agent_type": self.config.agent_type
+                },
+                importance=0.7,
+                long_term=True
+            )
+            
+            return understanding
+            
+        except Exception as e:
+            logger.error(f"Tool capability analysis failed for {tool.name}: {e}")
+            return ToolUnderstanding(
+                tool_name=tool.name,
+                agent_id=self.agent_id,
+                capability_summary=f"Analysis failed: {str(e)}",
+                confidence_level=0.0
+            )
 
     # --- Intelligent Tool Usage ---
 
     async def use_tool(
-        self, 
-        tool_name: str, 
+        self,
+        tool_name: str,
         operation: str,
         parameters: Dict[str, Any],
         reasoning: str
     ) -> ToolResult:
         """
-        Execute tool with full context:
-        1. Validate tool availability
-        2. Check parameter validity
-        3. Log reasoning for decision
-        4. Execute with timeout and error handling
-        5. Interpret results
-        6. Update usage history
-        7. Learn from outcome
+        Execute tool with full context and learning.
+        
+        Args:
+            tool_name: Name of the tool to use
+            operation: Operation to perform
+            parameters: Operation parameters
+            reasoning: Reasoning for using this tool
+            
+        Returns:
+            ToolResult with execution outcome
         """
-        if tool_name not in self.available_tools:
-            raise ValueError(f"Tool '{tool_name}' not available")
-        tool = self.available_tools[tool_name]
-        # 2. Validate parameters (assume tool provides validate_parameters)
-        if hasattr(tool, "validate_parameters"):
-            valid, msg = tool.validate_parameters(operation, parameters)
-            if not valid:
-                raise ValueError(f"Invalid parameters for {tool_name}.{operation}: {msg}")
-        # 3. Log reasoning
-        self.logger.info(
-            f"Using tool '{tool_name}' for operation '{operation}'",
-            operation="tool_usage",
-            metadata={"parameters": parameters, "reasoning": reasoning}
-        )
-        # 4. Execute with timeout/error handling
+        start_time = datetime.now()
+        
         try:
-            result = await asyncio.wait_for(
-                tool.execute(operation, parameters),
-                timeout=tool.timeout if hasattr(tool, "timeout") else 60
+            # Validate tool availability
+            if tool_name not in self.available_tools:
+                return ToolResult(
+                    operation_id=f"{tool_name}_{operation}_{int(start_time.timestamp())}",
+                    status=ToolStatus.FAILURE,
+                    error_message=f"Tool {tool_name} not available"
+                )
+            
+            tool = self.available_tools[tool_name]
+            
+            # Validate parameters
+            is_valid, error_msg = await tool.validate_params(operation, parameters)
+            if not is_valid:
+                return ToolResult(
+                    operation_id=f"{tool_name}_{operation}_{int(start_time.timestamp())}",
+                    status=ToolStatus.FAILURE,
+                    error_message=f"Parameter validation failed: {error_msg}"
+                )
+            
+            # Log reasoning
+            logger.info(f"Agent {self.agent_id} using tool {tool_name}.{operation}: {reasoning}")
+            
+            # Execute tool operation
+            result = await tool.execute(operation, parameters)
+            
+            # Record usage for learning
+            execution_time = (datetime.now() - start_time).total_seconds()
+            await self._record_tool_usage(
+                tool_name, operation, parameters, result, reasoning, execution_time
             )
-            status = "success"
+            
+            # Learn from the outcome
+            await self.learn_from_tool_usage(
+                tool_name, operation, parameters, result,
+                TaskOutcome(
+                    task_id=f"tool_usage_{int(start_time.timestamp())}",
+                    success=(result.status == ToolStatus.SUCCESS),
+                    quality_score=0.8 if result.status == ToolStatus.SUCCESS else 0.2,
+                    efficiency_score=min(1.0, 10.0 / execution_time) if execution_time > 0 else 1.0,
+                    tools_used=[tool_name],
+                    total_time=execution_time
+                )
+            )
+            
+            return result
+            
         except Exception as e:
-            result = {"error": str(e)}
-            status = "error"
-        # 5. Interpret results (assume ToolResult)
-        tool_result = ToolResult(
-            tool_name=tool_name,
-            operation=operation,
-            parameters=parameters,
-            result=result,
-            status=status,
-            reasoning=reasoning
-        )
-        # 6. Update usage history
-        entry = ToolUsageEntry(
-            tool_name=tool_name,
-            operation=operation,
-            parameters=parameters,
-            result=result,
-            status=status,
-            reasoning=reasoning,
-            timestamp=datetime.utcnow()
-        )
-        self.tool_usage_history.append(entry)
-        # 7. Learn from outcome
-        await self.learn_from_tool_usage(tool_name, operation, parameters, tool_result, TaskOutcome(status=status))
-        return tool_result
+            execution_time = (datetime.now() - start_time).total_seconds()
+            logger.error(f"Tool usage failed: {e}")
+            
+            error_result = ToolResult(
+                operation_id=f"{tool_name}_{operation}_{int(start_time.timestamp())}",
+                status=ToolStatus.FAILURE,
+                error_message=str(e),
+                execution_time=execution_time
+            )
+            
+            # Still record for learning
+            await self._record_tool_usage(
+                tool_name, operation, parameters, error_result, reasoning, execution_time
+            )
+            
+            return error_result
 
     async def plan_tool_usage(self, task: str) -> ToolUsagePlan:
         """
-        Create tool usage plan:
-        1. Analyze task requirements
-        2. Identify required tools
-        3. Determine operation sequence
-        4. Consider dependencies
-        5. Estimate resource needs
-        6. Plan fallback strategies
+        Create tool usage plan using LLM reasoning.
+        
+        Args:
+            task: Task description
+            
+        Returns:
+            ToolUsagePlan with detailed execution plan
         """
-        prompt = (
-            f"Task: {task}\n"
-            f"Available tools: {list(self.available_tools.keys())}\n"
-            "Plan tool usage: required tools, operation sequence, dependencies, resources, fallbacks."
-        )
-        plan = await self.execute_llm_task(prompt, context={"task": task}, include_tools=True)
-        return ToolUsagePlan.from_dict(plan if isinstance(plan, dict) else {})
-
-    # --- Tool Learning and Adaptation ---
+        try:
+            # Get available tools and their capabilities
+            available_tools_info = {}
+            for tool_name, tool in self.available_tools.items():
+                tool_info = await self.tool_registry.query_capabilities(tool_name)
+                available_tools_info[tool_name] = tool_info
+            
+            planning_prompt = f"""
+            Create a detailed plan for using tools to accomplish this task:
+            
+            Task: {task}
+            
+            Available Tools:
+            {json.dumps(available_tools_info, indent=2)}
+            
+            My role: {self.config.agent_type} agent
+            My capabilities: {self.config.capabilities}
+            
+            Create a plan including:
+            1. Tool sequence (order of tool operations)
+            2. Expected duration for each operation
+            3. Resource requirements
+            4. Fallback strategies if tools fail
+            5. Success criteria for each step
+            6. Risk assessment
+            
+            Consider:
+            - Tool dependencies and prerequisites
+            - Error handling and recovery
+            - Efficiency and optimization
+            - Resource constraints
+            
+            Format as structured tool usage plan.
+            """
+            
+            plan_result = await self.execute_llm_task(
+                user_prompt=planning_prompt,
+                context={
+                    "task": task,
+                    "available_tools": list(self.available_tools.keys()),
+                    "agent_type": self.config.agent_type
+                }
+            )
+            
+            # Convert to ToolUsagePlan
+            tool_operations = []
+            for step in plan_result.get("tool_sequence", []):
+                operation = ToolOperation(
+                    tool_name=step.get("tool_name", ""),
+                    operation=step.get("operation", ""),
+                    parameters=step.get("parameters", {}),
+                    reasoning=step.get("reasoning", ""),
+                    context={"step_number": step.get("step", 0)}
+                )
+                tool_operations.append(operation)
+            
+            return ToolUsagePlan(
+                task_description=task,
+                tool_sequence=tool_operations,
+                estimated_duration=plan_result.get("estimated_duration", 300),
+                resource_requirements=plan_result.get("resource_requirements", {}),
+                fallback_strategies=plan_result.get("fallback_strategies", []),
+                success_criteria=plan_result.get("success_criteria", []),
+                risk_assessment=plan_result.get("risk_assessment", {})
+            )
+            
+        except Exception as e:
+            logger.error(f"Tool usage planning failed: {e}")
+            return ToolUsagePlan(
+                task_description=task,
+                tool_sequence=[],
+                estimated_duration=0,
+                fallback_strategies=[f"Manual completion due to planning error: {str(e)}"]
+            )
 
     async def learn_from_tool_usage(
         self,
@@ -730,112 +977,165 @@ Provide a detailed, actionable response with clear reasoning and specific implem
         task_outcome: TaskOutcome
     ) -> None:
         """
-        Learn from each tool usage:
-        1. Correlate tool usage with task success
-        2. Identify effective parameter patterns
-        3. Update tool preference scores
-        4. Share insights via event bus
-        5. Adjust future tool selection
-        6. Build tool combination patterns
+        Learn from each tool usage to improve future decisions.
+        
+        Args:
+            tool_name: Name of tool used
+            operation: Operation performed
+            parameters: Parameters used
+            result: Tool execution result
+            task_outcome: Overall task outcome
         """
-        self.tool_learning_model.update(tool_name, operation, parameters, result, task_outcome)
-        # Share insights
-        discovery = ToolDiscovery(
-            tool_name=tool_name,
-            operation=operation,
-            parameters=parameters,
-            result=result,
-            task_outcome=task_outcome
-        )
-        await self.share_tool_discovery(discovery)
+        try:
+            # Analyze the correlation between tool usage and outcome
+            learning_prompt = f"""
+            Analyze this tool usage and learn from the outcome:
+            
+            Tool Used: {tool_name}
+            Operation: {operation}
+            Parameters: {json.dumps(parameters, indent=2)}
+            
+            Tool Result:
+            - Status: {result.status.value}
+            - Execution Time: {result.execution_time}
+            - Success: {result.status == ToolStatus.SUCCESS}
+            
+            Task Outcome:
+            - Overall Success: {task_outcome.success}
+            - Quality Score: {task_outcome.quality_score}
+            - Efficiency Score: {task_outcome.efficiency_score}
+            
+            Learning Analysis:
+            1. Was this tool the right choice for the task?
+            2. Were the parameters optimal?
+            3. What could be improved next time?
+            4. Are there better tool alternatives?
+            5. What patterns emerge from this usage?
+            
+            Provide insights for future tool selection and usage.
+            """
+            
+            learning_analysis = await self.execute_llm_task(
+                user_prompt=learning_prompt,
+                context={
+                    "tool_name": tool_name,
+                    "agent_type": self.config.agent_type,
+                    "result": result.__dict__,
+                    "outcome": task_outcome.__dict__
+                }
+            )
+            
+            # Update tool preferences based on learning
+            if tool_name not in self.tool_performance_metrics:
+                self.tool_performance_metrics[tool_name] = ToolMetrics()
+            
+            metrics = self.tool_performance_metrics[tool_name]
+            metrics.total_uses += 1
+            
+            # Update success rate
+            if result.status == ToolStatus.SUCCESS:
+                metrics.success_rate = (metrics.success_rate * (metrics.total_uses - 1) + 1.0) / metrics.total_uses
+            else:
+                metrics.success_rate = (metrics.success_rate * (metrics.total_uses - 1)) / metrics.total_uses
+            
+            # Update average execution time
+            if result.execution_time:
+                if metrics.average_execution_time == 0:
+                    metrics.average_execution_time = result.execution_time
+                else:
+                    metrics.average_execution_time = (
+                        metrics.average_execution_time * (metrics.total_uses - 1) + result.execution_time
+                    ) / metrics.total_uses
+            
+            # Store learning insights in memory
+            await self.memory_manager.store_memory(
+                content=f"Tool learning: {tool_name} - {learning_analysis.get('summary', '')}",
+                metadata={
+                    "type": "tool_learning",
+                    "tool_name": tool_name,
+                    "operation": operation,
+                    "success": task_outcome.success,
+                    "agent_type": self.config.agent_type
+                },
+                importance=0.6,
+                long_term=True
+            )
+            
+        except Exception as e:
+            logger.error(f"Learning from tool usage failed: {e}")
 
     async def share_tool_discovery(self, discovery: ToolDiscovery) -> None:
         """
-        Share tool insights with other agents:
-        1. Publish successful tool patterns
-        2. Warn about tool limitations
-        3. Suggest tool combinations
-        4. Share performance metrics
+        Share tool insights with other agents via event bus.
+        
+        Args:
+            discovery: Tool discovery information to share
         """
-        await self.event_bus.publish("tool.discovery", discovery.to_dict())
-
-    # --- Tool Operation Management ---
-
-    async def execute_tool_workflow(
-        self,
-        workflow: List[ToolOperation]
-    ) -> "WorkflowResult":
-        """
-        Execute complex multi-tool workflows:
-        1. Validate workflow feasibility
-        2. Manage tool operation dependencies
-        3. Handle parallel operations where possible
-        4. Rollback on failure if needed
-        5. Collect comprehensive results
-        """
-        # 1. Validate feasibility (simple: check all tools available)
-        for op in workflow:
-            if op.tool_name not in self.available_tools:
-                raise ValueError(f"Tool '{op.tool_name}' not available for workflow")
-        results = []
-        # 2. Manage dependencies (sequential for now)
-        for op in workflow:
-            result = await self.use_tool(
-                tool_name=op.tool_name,
-                operation=op.operation,
-                parameters=op.parameters,
-                reasoning=op.reasoning
+        try:
+            # Convert discovery to dict manually to handle serialization
+            discovery_dict = {
+                "discovery_id": discovery.discovery_id,
+                "agent_id": discovery.agent_id,
+                "discovery_type": discovery.discovery_type,
+                "description": discovery.description,
+                "tool_names": discovery.tool_names,
+                "evidence": discovery.evidence,
+                "confidence": discovery.confidence,
+                "applicability": discovery.applicability,
+                "timestamp": discovery.timestamp.isoformat()
+            }
+            
+            # Create an AgentMessage object for the event bus
+            discovery_message = AgentMessage(
+                message_id=str(uuid.uuid4()),
+                sender_id=self.agent_id,
+                receiver_id="broadcast",
+                message_type=MessageType.NOTIFICATION,
+                content={
+                    "agent_id": self.agent_id,
+                    "discovery": discovery_dict,
+                    "timestamp": datetime.now().isoformat()
+                }
             )
-            results.append(result)
-            if result.status != "success":
-                # 4. Rollback if needed (not implemented)
-                break
-        # 5. Collect results
-        from ..models.langgraph_models import WorkflowResult
-        return WorkflowResult(
-            workflow_id="tool_workflow_" + str(uuid.uuid4()),
-            status="completed" if all(r.status == "success" for r in results) else "partial",
-            deliverables={f"{r.tool_name}.{r.operation}": r.result for r in results},
-            task_results={f"{r.tool_name}.{r.operation}": r.to_dict() for r in results},
-            execution_metrics={},
-            error_message=None if all(r.status == "success" for r in results) else "Some tool operations failed"
+            
+            await self.event_bus.publish("tool_discovery", discovery_message)
+            
+            logger.debug(f"Shared tool discovery: {discovery.description}")
+            
+        except Exception as e:
+            logger.error(f"Failed to share tool discovery: {e}")
+
+    async def _record_tool_usage(
+        self,
+        tool_name: str,
+        operation: str,
+        parameters: Dict[str, Any],
+        result: ToolResult,
+        reasoning: str,
+        execution_time: float
+    ) -> None:
+        """Record tool usage for learning and optimization."""
+        usage_entry = ToolUsageEntry(
+            agent_id=self.agent_id,
+            tool_name=tool_name,
+            operation=operation,
+            parameters=parameters,
+            execution_time=execution_time,
+            success=(result.status == ToolStatus.SUCCESS),
+            error_details=result.error_message,
+            context={
+                "reasoning": reasoning,
+                "agent_type": self.config.agent_type,
+                "task_context": "agent_task"
+            },
+            outcome_quality=0.8 if result.status == ToolStatus.SUCCESS else 0.2
         )
-
-    async def monitor_tool_operations(self) -> None:
-        """
-        Continuous monitoring of active operations:
-        1. Track operation progress
-        2. Detect stuck operations
-        3. Handle timeouts gracefully
-        4. Update operation status
-        5. Trigger retries if needed
-        """
-        while True:
-            for op_id, task in list(self.active_tool_operations.items()):
-                if task.done():
-                    result = task.result() if not task.cancelled() else None
-                    self.logger.info(
-                        f"Tool operation {op_id} completed",
-                        operation="tool_monitor",
-                        metadata={"result": result}
-                    )
-                    del self.active_tool_operations[op_id]
-                elif task._state == "PENDING":
-                    # Detect stuck (simple: log if pending too long)
-                    self.logger.warning(
-                        f"Tool operation {op_id} may be stuck",
-                        operation="tool_monitor"
-                    )
-            await asyncio.sleep(5)
-
-    async def _handle_tool_availability(self, message: Any) -> None:
-        """Handle tool availability events (add/remove tools)."""
-        # Example: message = {"tool": "tool_name", "status": "available|unavailable"}
-        tool = message.get("tool")
-        status = message.get("status")
-        if status == "available":
-            # Re-discover tool
-            await self.discover_available_tools()
-        elif status == "unavailable" and tool in self.available_tools:
-            del self.available_tools[tool]
-            self.logger.info(f"Tool '{tool}' removed from available_tools", operation="tool_availability")
+        
+        self.tool_usage_history.append(usage_entry)
+        
+        # Also record with the tool itself
+        tool = self.available_tools.get(tool_name)
+        if tool:
+            await tool.record_usage(
+                self.agent_id, operation, parameters, result, usage_entry.context
+            )
