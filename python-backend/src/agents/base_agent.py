@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Coroutine
 
 from ..core.exceptions import AgentError, LLMError
 
@@ -24,6 +24,10 @@ from ..models.task_models import TaskContext
 from ..config.agent_configs import agent_config_manager
 from ..core.enhanced_logger import get_logger, log_operation, log_llm_interaction, log_performance_metrics
 from ..config import get_logger as get_config_logger
+from ..models.tool_models import (
+    BaseTool, ToolUsageEntry, ToolLearningModel, ToolMetrics, ToolUnderstanding,
+    ToolResult, ToolUsagePlan, ToolOperation, ToolDiscovery, TaskOutcome
+)
 
 
 logger = logging.getLogger(__name__)
@@ -138,7 +142,15 @@ class BaseAgent(ABC):
         
         # Register for relevant events
         asyncio.create_task(self._register_event_handlers())
-    
+        
+        # --- Tool-related attributes ---
+        self.available_tools: Dict[str, BaseTool] = {}
+        self.tool_capabilities: Dict[str, List[str]] = {}
+        self.tool_usage_history: List[ToolUsageEntry] = []
+        self.tool_learning_model: ToolLearningModel = ToolLearningModel()
+        self.tool_performance_metrics: Dict[str, ToolMetrics] = {}
+        self.active_tool_operations: Dict[str, Coroutine] = {}
+
     async def _register_event_handlers(self) -> None:
         """Register event handlers for this agent."""
         try:
@@ -204,10 +216,17 @@ class BaseAgent(ABC):
         user_prompt: str,
         context: Dict[str, Any],
         structured_output: bool = False,
-        max_retries: int = None
-    ) -> Union[str, Dict[str, Any]]:
+        max_retries: int = None,
+        include_tools: bool = True
+    ) -> dict:
         """
-        Execute a task using LLM reasoning with comprehensive context.
+        Enhanced LLM execution with tool awareness:
+        1. Include available tools in system prompt
+        2. Add tool usage examples from history
+        3. Parse tool usage intentions from response
+        4. Execute planned tool operations
+        5. Feed results back to LLM if needed
+        6. Iterate until task complete
         
         Args:
             user_prompt: The specific task or question for the LLM
@@ -218,143 +237,52 @@ class BaseAgent(ABC):
         Returns:
             LLM response as string or parsed JSON dictionary
         """
-        from ..config.agent_configs import agent_config_manager
-        
-        # Get agent configuration
-        agent_config = agent_config_manager.get_agent_config(self.agent_type)
-        
-        if max_retries is None:
-            max_retries = agent_config.model_config.max_retries if agent_config else 3
-        
-        system_prompt = await self.get_system_prompt()
-        memory_context = await self.memory_manager.get_relevant_context(
-            user_prompt,
-            agent_id=self.agent_id
-        )
-        
-        full_prompt = await self._construct_full_prompt(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            context=context,
-            memory_context=memory_context,
-            structured_output=structured_output,
-            agent_config=agent_config
-        )
-        
-        with self.logger.context(
-            correlation_id=context.get('correlation_id'),
-            task_id=context.get('task_id'),
-            operation="llm_task_execution"
-        ) as log_ctx:
-            
-            self.logger.info(
-                f"Starting LLM task execution with {len(user_prompt)} character prompt",
-                operation="llm_call",
-                metadata={
-                    "prompt_length": len(user_prompt),
-                    "structured_output": structured_output,
-                    "max_retries": max_retries or 3
-                }
+        # 1. Compose tool info for prompt
+        tool_info = ""
+        if include_tools and self.available_tools:
+            tool_info = "\n".join(
+                f"- {name}: {', '.join(self.tool_capabilities.get(name, []))}"
+                for name in self.available_tools
             )
-            
-            for attempt in range(max_retries):
-                try:
-                    self.logger.debug(f"LLM execution attempt {attempt + 1}/{max_retries}")
-                    
-                    # Use configuration for model parameters
-                    model = agent_config.model_config.model if agent_config else self.config.llm_model
-                    temperature = agent_config.model_config.temperature if agent_config else self.config.temperature
-                    max_tokens = agent_config.model_config.max_tokens if agent_config else self.config.max_tokens
-                    timeout = agent_config.model_config.timeout if agent_config else self.config.timeout
-                    provider = agent_config.model_config.provider if agent_config else None
-                    
-                    response = await self.llm_client.generate(
-                        prompt=full_prompt,
-                        model=model,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        timeout=timeout,
-                        provider=provider,
-                        agent_id=self.agent_id,
-                        correlation_id=context.get('correlation_id', '')
-                    )
-                    
-                    # Store interaction in memory
-                    await self.memory_manager.store_interaction(
-                        agent_id=self.agent_id,
-                        prompt=user_prompt,
-                        response=response,
-                        context=context
-                    )
-                    
-                    self.logger.info(
-                        f"LLM task completed successfully on attempt {attempt + 1}",
-                        operation="llm_response",
-                        metadata={
-                            "attempt": attempt + 1,
-                            "response_length": len(response),
-                            "model": model,
-                            "temperature": temperature
-                        }
-                    )
-                    
-                    if structured_output:
-                        try:
-                            parsed_response = json.loads(response.strip())
-                            return parsed_response
-                        except json.JSONDecodeError as e:
-                            self.logger.warning(
-                                f"Failed to parse JSON response: {e}",
-                                metadata={"attempt": attempt + 1, "response_preview": response[:200]}
-                            )
-                            if attempt == max_retries - 1:
-                                raise AgentError(f"Invalid JSON response after {max_retries} attempts")
-                            continue
-                    
-                    return response.strip()
-                    
-                except Exception as e:
-                    self.logger.error(
-                        f"LLM execution failed (attempt {attempt + 1}): {e}",
-                        operation="llm_call",
-                        metadata={"attempt": attempt + 1, "error_type": type(e).__name__}
-                    )
-                    
-                    # Try fallback provider if configured
-                    if (attempt == 0 and agent_config and 
-                        agent_config.model_config.fallback_provider):
-                        try:
-                            self.logger.info("Attempting fallback provider", metadata={"provider": agent_config.model_config.fallback_provider})
-                            
-                            fallback_response = await self.llm_client.generate(
-                                prompt=full_prompt,
-                                model=agent_config.model_config.fallback_model or model,
-                                temperature=temperature,
-                                max_tokens=max_tokens,
-                                timeout=timeout,
-                                provider=agent_config.model_config.fallback_provider,
-                                agent_id=self.agent_id,
-                                correlation_id=context.get('correlation_id', '')
-                            )
-                            
-                            self.logger.info("Fallback provider succeeded")
-                            
-                            if structured_output:
-                                try:
-                                    return json.loads(fallback_response.strip())
-                                except json.JSONDecodeError:
-                                    pass
-                            
-                            return fallback_response.strip()
-                            
-                        except Exception as fallback_error:
-                            self.logger.warning(f"Fallback provider also failed: {fallback_error}")
-                    
-                    if attempt == max_retries - 1:
-                        raise LLMError(f"LLM execution failed after {max_retries} attempts: {e}")
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
-            
-            raise LLMError("Unexpected error in LLM execution")
+        usage_examples = ""
+        if include_tools and self.tool_usage_history:
+            usage_examples = "\n".join(
+                f"{entry.tool_name}.{entry.operation}({entry.parameters}) => {entry.status}"
+                for entry in self.tool_usage_history[-3:]
+            )
+        # 2. Build prompt
+        system_prompt = await self.get_system_prompt()
+        full_prompt = (
+            f"{system_prompt}\n"
+            f"Available tools:\n{tool_info}\n"
+            f"Recent tool usage:\n{usage_examples}\n"
+            f"Project context:\n{context.get('project', {})}\n"
+            f"Task:\n{user_prompt}\n"
+            "If tool usage is needed, specify tool, operation, and parameters."
+        )
+        # 3. Call LLM
+        response = await super().execute_llm_task(
+            user_prompt=full_prompt,
+            context=context,
+            structured_output=True,
+            max_retries=max_retries
+        )
+        # 4. Parse tool usage intentions
+        tool_plan = response.get("tool_plan") if isinstance(response, dict) else None
+        if include_tools and tool_plan:
+            # 5. Execute planned tool operations
+            tool_results = []
+            for op in tool_plan.get("operations", []):
+                tool_result = await self.use_tool(
+                    tool_name=op.get("tool"),
+                    operation=op.get("operation"),
+                    parameters=op.get("parameters", {}),
+                    reasoning=op.get("reasoning", "")
+                )
+                tool_results.append(tool_result)
+            # 6. Feed results back if needed
+            response["tool_results"] = [tr.to_dict() for tr in tool_results]
+        return response
     
     async def _construct_full_prompt(
         self,
@@ -652,3 +580,262 @@ Provide a detailed, actionable response with clear reasoning and specific implem
             del self.active_tasks[task_id]
         
         self.logger.info("Agent shutdown complete", operation="agent_shutdown")
+    
+    # --- Tool Discovery and Understanding ---
+
+    async def discover_available_tools(self) -> None:
+        """
+        Discover and understand available tools:
+        1. Query tool registry for all registered tools
+        2. For each tool, call get_capabilities() and analyze
+        3. Use LLM to understand tool descriptions and capabilities
+        4. Store structured understanding in memory
+        5. Subscribe to tool availability changes
+        6. Build tool preference based on agent type
+        """
+        # 1. Query tool registry (assume registry is available via event_bus or memory_manager)
+        tool_registry = await self.memory_manager.get_tool_registry()
+        for tool_name, tool in tool_registry.items():
+            self.available_tools[tool_name] = tool
+            # 2. Get capabilities
+            capabilities = await tool.get_capabilities()
+            self.tool_capabilities[tool_name] = capabilities
+            # 3. Analyze tool
+            understanding = await self.analyze_tool_capability(tool)
+            # 4. Store in memory
+            await self.memory_manager.store_memory(
+                content=f"Tool analyzed: {tool_name}",
+                metadata={"type": "tool_understanding", "tool": tool_name, "understanding": understanding},
+                importance=0.7
+            )
+        # 5. Subscribe to tool availability changes
+        await self.event_bus.subscribe("tool.availability", self._handle_tool_availability)
+        # 6. Build tool preference (simple: prefer tools matching agent_type)
+        self.tool_learning_model.build_preferences(self.agent_type, self.tool_capabilities)
+
+    async def analyze_tool_capability(self, tool: BaseTool) -> ToolUnderstanding:
+        """
+        Deep analysis of a tool's capabilities:
+        1. Parse capability description
+        2. Generate usage scenarios
+        3. Identify parameter patterns
+        4. Map to agent's responsibilities
+        5. Create mental model of tool usage
+        """
+        description = await tool.get_description()
+        capabilities = await tool.get_capabilities()
+        # Use LLM to analyze
+        prompt = (
+            f"Tool: {tool.name}\n"
+            f"Description: {description}\n"
+            f"Capabilities: {capabilities}\n"
+            "Analyze this tool for usage scenarios, parameter patterns, and mapping to agent responsibilities."
+        )
+        analysis = await self.execute_llm_task(prompt, context={"tool": tool.name}, include_tools=False)
+        return ToolUnderstanding.from_dict(analysis if isinstance(analysis, dict) else {})
+
+    # --- Intelligent Tool Usage ---
+
+    async def use_tool(
+        self, 
+        tool_name: str, 
+        operation: str,
+        parameters: Dict[str, Any],
+        reasoning: str
+    ) -> ToolResult:
+        """
+        Execute tool with full context:
+        1. Validate tool availability
+        2. Check parameter validity
+        3. Log reasoning for decision
+        4. Execute with timeout and error handling
+        5. Interpret results
+        6. Update usage history
+        7. Learn from outcome
+        """
+        if tool_name not in self.available_tools:
+            raise ValueError(f"Tool '{tool_name}' not available")
+        tool = self.available_tools[tool_name]
+        # 2. Validate parameters (assume tool provides validate_parameters)
+        if hasattr(tool, "validate_parameters"):
+            valid, msg = tool.validate_parameters(operation, parameters)
+            if not valid:
+                raise ValueError(f"Invalid parameters for {tool_name}.{operation}: {msg}")
+        # 3. Log reasoning
+        self.logger.info(
+            f"Using tool '{tool_name}' for operation '{operation}'",
+            operation="tool_usage",
+            metadata={"parameters": parameters, "reasoning": reasoning}
+        )
+        # 4. Execute with timeout/error handling
+        try:
+            result = await asyncio.wait_for(
+                tool.execute(operation, parameters),
+                timeout=tool.timeout if hasattr(tool, "timeout") else 60
+            )
+            status = "success"
+        except Exception as e:
+            result = {"error": str(e)}
+            status = "error"
+        # 5. Interpret results (assume ToolResult)
+        tool_result = ToolResult(
+            tool_name=tool_name,
+            operation=operation,
+            parameters=parameters,
+            result=result,
+            status=status,
+            reasoning=reasoning
+        )
+        # 6. Update usage history
+        entry = ToolUsageEntry(
+            tool_name=tool_name,
+            operation=operation,
+            parameters=parameters,
+            result=result,
+            status=status,
+            reasoning=reasoning,
+            timestamp=datetime.utcnow()
+        )
+        self.tool_usage_history.append(entry)
+        # 7. Learn from outcome
+        await self.learn_from_tool_usage(tool_name, operation, parameters, tool_result, TaskOutcome(status=status))
+        return tool_result
+
+    async def plan_tool_usage(self, task: str) -> ToolUsagePlan:
+        """
+        Create tool usage plan:
+        1. Analyze task requirements
+        2. Identify required tools
+        3. Determine operation sequence
+        4. Consider dependencies
+        5. Estimate resource needs
+        6. Plan fallback strategies
+        """
+        prompt = (
+            f"Task: {task}\n"
+            f"Available tools: {list(self.available_tools.keys())}\n"
+            "Plan tool usage: required tools, operation sequence, dependencies, resources, fallbacks."
+        )
+        plan = await self.execute_llm_task(prompt, context={"task": task}, include_tools=True)
+        return ToolUsagePlan.from_dict(plan if isinstance(plan, dict) else {})
+
+    # --- Tool Learning and Adaptation ---
+
+    async def learn_from_tool_usage(
+        self,
+        tool_name: str,
+        operation: str,
+        parameters: Dict[str, Any],
+        result: ToolResult,
+        task_outcome: TaskOutcome
+    ) -> None:
+        """
+        Learn from each tool usage:
+        1. Correlate tool usage with task success
+        2. Identify effective parameter patterns
+        3. Update tool preference scores
+        4. Share insights via event bus
+        5. Adjust future tool selection
+        6. Build tool combination patterns
+        """
+        self.tool_learning_model.update(tool_name, operation, parameters, result, task_outcome)
+        # Share insights
+        discovery = ToolDiscovery(
+            tool_name=tool_name,
+            operation=operation,
+            parameters=parameters,
+            result=result,
+            task_outcome=task_outcome
+        )
+        await self.share_tool_discovery(discovery)
+
+    async def share_tool_discovery(self, discovery: ToolDiscovery) -> None:
+        """
+        Share tool insights with other agents:
+        1. Publish successful tool patterns
+        2. Warn about tool limitations
+        3. Suggest tool combinations
+        4. Share performance metrics
+        """
+        await self.event_bus.publish("tool.discovery", discovery.to_dict())
+
+    # --- Tool Operation Management ---
+
+    async def execute_tool_workflow(
+        self,
+        workflow: List[ToolOperation]
+    ) -> "WorkflowResult":
+        """
+        Execute complex multi-tool workflows:
+        1. Validate workflow feasibility
+        2. Manage tool operation dependencies
+        3. Handle parallel operations where possible
+        4. Rollback on failure if needed
+        5. Collect comprehensive results
+        """
+        # 1. Validate feasibility (simple: check all tools available)
+        for op in workflow:
+            if op.tool_name not in self.available_tools:
+                raise ValueError(f"Tool '{op.tool_name}' not available for workflow")
+        results = []
+        # 2. Manage dependencies (sequential for now)
+        for op in workflow:
+            result = await self.use_tool(
+                tool_name=op.tool_name,
+                operation=op.operation,
+                parameters=op.parameters,
+                reasoning=op.reasoning
+            )
+            results.append(result)
+            if result.status != "success":
+                # 4. Rollback if needed (not implemented)
+                break
+        # 5. Collect results
+        from ..models.langgraph_models import WorkflowResult
+        return WorkflowResult(
+            workflow_id="tool_workflow_" + str(uuid.uuid4()),
+            status="completed" if all(r.status == "success" for r in results) else "partial",
+            deliverables={f"{r.tool_name}.{r.operation}": r.result for r in results},
+            task_results={f"{r.tool_name}.{r.operation}": r.to_dict() for r in results},
+            execution_metrics={},
+            error_message=None if all(r.status == "success" for r in results) else "Some tool operations failed"
+        )
+
+    async def monitor_tool_operations(self) -> None:
+        """
+        Continuous monitoring of active operations:
+        1. Track operation progress
+        2. Detect stuck operations
+        3. Handle timeouts gracefully
+        4. Update operation status
+        5. Trigger retries if needed
+        """
+        while True:
+            for op_id, task in list(self.active_tool_operations.items()):
+                if task.done():
+                    result = task.result() if not task.cancelled() else None
+                    self.logger.info(
+                        f"Tool operation {op_id} completed",
+                        operation="tool_monitor",
+                        metadata={"result": result}
+                    )
+                    del self.active_tool_operations[op_id]
+                elif task._state == "PENDING":
+                    # Detect stuck (simple: log if pending too long)
+                    self.logger.warning(
+                        f"Tool operation {op_id} may be stuck",
+                        operation="tool_monitor"
+                    )
+            await asyncio.sleep(5)
+
+    async def _handle_tool_availability(self, message: Any) -> None:
+        """Handle tool availability events (add/remove tools)."""
+        # Example: message = {"tool": "tool_name", "status": "available|unavailable"}
+        tool = message.get("tool")
+        status = message.get("status")
+        if status == "available":
+            # Re-discover tool
+            await self.discover_available_tools()
+        elif status == "unavailable" and tool in self.available_tools:
+            del self.available_tools[tool]
+            self.logger.info(f"Tool '{tool}' removed from available_tools", operation="tool_availability")
