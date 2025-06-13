@@ -1,0 +1,53 @@
+{
+  "timestamp": "2025-06-13T23:31:08.130214",
+  "total_duration": 0.0032112598419189453,
+  "success_rate": 100.0,
+  "overall_success": true,
+  "test_results": [
+    {
+      "test": "System Initialization",
+      "success": true,
+      "duration": 0.0001742839813232422
+    },
+    {
+      "test": "Tool Capabilities",
+      "success": true,
+      "duration": 0.00017309188842773438
+    },
+    {
+      "test": "Tool Operations",
+      "success": true,
+      "duration": 0.0001785755157470703
+    },
+    {
+      "test": "Parameter Validation",
+      "success": true,
+      "duration": 0.00017142295837402344
+    },
+    {
+      "test": "Error Handling",
+      "success": true,
+      "duration": 0.0001862049102783203
+    },
+    {
+      "test": "Agent Compatibility",
+      "success": true,
+      "duration": 0.00016808509826660156
+    },
+    {
+      "test": "Performance",
+      "success": true,
+      "duration": 0.00017571449279785156
+    },
+    {
+      "test": "Concurrent Usage",
+      "success": true,
+      "duration": 0.0003609657287597656
+    },
+    {
+      "test": "Registry Features",
+      "success": true,
+      "duration": 0.00017499923706054688
+    }
+  ]
+}
