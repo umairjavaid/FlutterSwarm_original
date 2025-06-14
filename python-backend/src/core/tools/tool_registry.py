@@ -1438,3 +1438,138 @@ class ToolRegistry:
             "monitoring_active": self._health_check_task is not None and not self._health_check_task.done(),
             "registry_uptime": datetime.now().isoformat()
         }
+
+    async def execute_llm_task(self, user_prompt: str, context: dict, include_tools: bool = True) -> dict:
+        """
+        Execute an LLM-driven task with comprehensive tool integration.
+        - Includes available tools/capabilities in the system prompt
+        - Adds successful tool usage patterns from history
+        - Parses tool usage intentions from LLM responses
+        - Executes planned tool operations automatically
+        - Feeds tool results back to LLM for interpretation
+        - Supports iterative tool usage until task completion
+        """
+        llm_client = context.get("llm_client")
+        if llm_client is None:
+            raise ValueError("LLM client must be provided in context")
+
+        # Step 1: Build tool-aware system prompt
+        system_prompt = self._generate_tool_aware_prompt(user_prompt, context)
+        conversation = []
+        max_iterations = 5
+        iteration = 0
+        final_result = None
+        tool_results = {}
+        while iteration < max_iterations:
+            # Step 2: Call LLM with current prompt and context
+            llm_input = system_prompt
+            if conversation:
+                llm_input += "\n\n" + "\n".join(conversation)
+            if tool_results:
+                llm_input += f"\n\n[Tool Results]: {tool_results}"
+            llm_response = await llm_client.generate(
+                prompt=llm_input,
+                model=context.get("llm_model"),
+                temperature=context.get("temperature", 0.3),
+                max_tokens=context.get("max_tokens", 2000),
+            )
+            conversation.append(f"[LLM]: {llm_response}")
+
+            # Step 3: Parse tool usage intentions from LLM response
+            tool_calls = self._parse_tool_usage_intentions(llm_response)
+            if not tool_calls:
+                # No more tool calls, assume task complete
+                final_result = llm_response
+                break
+
+            # Step 4: Validate and execute tool calls
+            tool_results = {}
+            for call in tool_calls:
+                tool_name = call.get("tool")
+                operation = call.get("operation")
+                params = call.get("parameters", {})
+                if not self._validate_tool_call(tool_name, operation):
+                    tool_results[tool_name] = {"error": f"Invalid tool or operation: {tool_name}.{operation}"}
+                    continue
+                tool = self.get_tool(tool_name)
+                try:
+                    op_method = getattr(tool, operation)
+                    if asyncio.iscoroutinefunction(op_method):
+                        result = await op_method(params, None)
+                    else:
+                        result = op_method(params, None)
+                    tool_results[tool_name] = result if isinstance(result, dict) else result.__dict__
+                except Exception as e:
+                    tool_results[tool_name] = {"error": str(e)}
+            # Feed tool results back to LLM for further reasoning
+            iteration += 1
+        return {"result": final_result, "conversation": conversation, "tool_results": tool_results}
+
+    def _generate_tool_aware_prompt(self, user_prompt: str, context: dict) -> str:
+        """
+        Generate a system prompt that includes:
+        - Available tool capabilities
+        - Usage examples from history
+        - Current project context
+        - Resource constraints and performance considerations
+        - Formatted for optimal LLM understanding and tool selection
+        """
+        available_tools = self.get_available_tools()
+        tool_descriptions = []
+        for tool in available_tools:
+            try:
+                capabilities = asyncio.run(tool.get_capabilities())
+            except Exception:
+                capabilities = {}
+            tool_descriptions.append(f"- {tool.name} (v{tool.version}): {tool.description}\n  Capabilities: {capabilities}")
+        # Add usage examples from history
+        usage_examples = []
+        for tool in available_tools:
+            history = getattr(tool, "usage_history", [])
+            for entry in history[-2:]:  # last 2 usages
+                usage_examples.append(f"Tool: {tool.name}, Operation: {entry.get('operation')}, Params: {entry.get('params')}, Success: {entry.get('success')}")
+        # Project context
+        project_ctx = context.get("project_context", "[No project context provided]")
+        # Resource/performance
+        perf = context.get("performance", "Standard performance constraints apply.")
+        prompt = (
+            "You are an intelligent multi-agent system with access to the following tools.\n"
+            "When planning, select the best tool(s) and operations for the user's task.\n"
+            "If tool usage is needed, respond with a JSON array of tool calls.\n"
+            "Otherwise, provide the final answer.\n\n"
+            f"[User Task]: {user_prompt}\n\n"
+            f"[Available Tools]:\n" + "\n".join(tool_descriptions) + "\n\n"
+            f"[Usage Examples]:\n" + ("\n".join(usage_examples) if usage_examples else "None") + "\n\n"
+            f"[Project Context]: {project_ctx}\n"
+            f"[Performance]: {perf}\n"
+            "Respond in this format if using tools: \n"
+            "[TOOL_CALLS]: [\n  {\"tool\": \"tool_name\", \"operation\": \"operation_name\", \"parameters\": {...}}, ...\n]\n"
+        )
+        return prompt
+
+    def _parse_tool_usage_intentions(self, llm_response: str) -> list:
+        """
+        Extract tool calls from LLM response. Expects a JSON array after [TOOL_CALLS]:
+        """
+        import json, re
+        match = re.search(r"\[TOOL_CALLS\]:\s*(\[.*?\])", llm_response, re.DOTALL)
+        if not match:
+            return []
+        try:
+            tool_calls = json.loads(match.group(1))
+            if isinstance(tool_calls, list):
+                return tool_calls
+        except Exception:
+            return []
+        return []
+
+    def _validate_tool_call(self, tool_name: str, operation: str) -> bool:
+        """
+        Validate that the tool and operation exist and are available.
+        """
+        tool = self.get_tool(tool_name)
+        if not tool:
+            return False
+        if not hasattr(tool, operation):
+            return False
+        return True

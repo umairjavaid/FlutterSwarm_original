@@ -30,6 +30,7 @@ from ..models.tool_models import (
     ToolResult, ToolUsagePlan, ToolOperation, ToolDiscovery, TaskOutcome, ToolStatus,
     AsyncTask
 )
+from ..models.learning_models import AdvancedToolWorkflowMixin
 
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ class AgentConfig:
             self.max_retries = getattr(settings.llm, 'max_retries', 3)
 
 
-class BaseAgent(ABC):
+class BaseAgent(ABC, AdvancedToolWorkflowMixin):
     """
     Abstract base class for all FlutterSwarm agents.
     
@@ -171,6 +172,11 @@ class BaseAgent(ABC):
         self.tool_learning_model: Optional[ToolLearningModel] = None
         self.tool_performance_metrics: Dict[str, ToolMetrics] = {}
         self.active_tool_operations: Dict[str, AsyncTask] = {}
+        
+        # --- Advanced workflow management (from AdvancedToolWorkflowMixin) ---
+        self.operation_status: Dict[str, str] = {}
+        self._operation_resources: Dict[str, List[Any]] = {}
+        self._workflow_monitoring_task: Optional[asyncio.Task] = None
         
         # Initialize tool system
         asyncio.create_task(self._initialize_tool_system())
@@ -709,6 +715,10 @@ Provide a detailed, actionable response with clear reasoning and specific implem
             )
             
             await self.share_tool_discovery(discovery_insight)
+            
+            # Start workflow monitoring task
+            self._workflow_monitoring_task = asyncio.create_task(self.monitor_tool_operations())
+            logger.info(f"Started workflow monitoring task for agent {self.agent_id}")
             
         except Exception as e:
             logger.error(f"Tool discovery failed for agent {self.agent_id}: {e}")
@@ -1271,178 +1281,101 @@ Provide a detailed, actionable response with clear reasoning and specific implem
                 self.agent_id, operation, parameters, result, usage_entry.context
             )
     
-    # --- Tool Discovery Helper Methods ---
+    # --- Workflow Management Methods (required by AdvancedToolWorkflowMixin) ---
     
-    async def _subscribe_to_tool_events(self) -> None:
-        """Subscribe to tool availability and performance events via event bus."""
-        try:
-            # Subscribe to tool availability changes
-            await self.event_bus.subscribe(
-                "tool.availability.*",
-                self._handle_tool_availability_change,
-                subscriber_id=f"{self.agent_id}_tool_availability"
-            )
+    def get_tool(self, tool_name: str) -> Optional[BaseTool]:
+        """
+        Get a tool by name for workflow execution.
+        
+        Args:
+            tool_name: Name of the tool to retrieve
             
-            # Subscribe to tool performance updates
-            await self.event_bus.subscribe(
-                "tool.performance.*", 
-                self._handle_tool_performance_update,
-                subscriber_id=f"{self.agent_id}_tool_performance"
-            )
-            
-            # Subscribe to new tool registrations
-            await self.event_bus.subscribe(
-                "tool.registered.*",
-                self._handle_new_tool_registration,
-                subscriber_id=f"{self.agent_id}_tool_registration"
-            )
-            
-            logger.info(f"Agent {self.agent_id} subscribed to tool events")
-            
-        except Exception as e:
-            logger.error(f"Failed to subscribe to tool events: {e}")
+        Returns:
+            BaseTool instance if found, None otherwise
+        """
+        return self.available_tools.get(tool_name)
     
-    async def _handle_tool_availability_change(self, message) -> None:
-        """Handle tool availability change events."""
-        try:
-            tool_name = message.data.get("tool_name")
-            is_available = message.data.get("is_available", False)
-            
-            if tool_name in self.available_tools:
-                if not is_available:
-                    logger.warning(f"Tool {tool_name} became unavailable for agent {self.agent_id}")
-                    # Update availability but keep the tool for potential recovery
-                    self.tool_capabilities[tool_name] = ["unavailable"]
-                else:
-                    logger.info(f"Tool {tool_name} became available again for agent {self.agent_id}")
-                    # Re-analyze the tool if it's back online
-                    tool = self.available_tools[tool_name]
-                    understanding = await self.analyze_tool_capability(tool)
-                    self.tool_capabilities[tool_name] = understanding.usage_scenarios
-            
-        except Exception as e:
-            logger.error(f"Error handling tool availability change: {e}")
+    async def start_workflow_monitoring(self) -> None:
+        """Start the workflow monitoring task if not already running."""
+        if not self._workflow_monitoring_task or self._workflow_monitoring_task.done():
+            self._workflow_monitoring_task = asyncio.create_task(self.monitor_tool_operations())
+            self.logger.info("Workflow monitoring started")
     
-    async def _handle_tool_performance_update(self, message) -> None:
-        """Handle tool performance update events."""
-        try:
-            tool_name = message.data.get("tool_name")
-            performance_data = message.data.get("performance", {})
-            
-            if tool_name in self.tool_performance_metrics:
-                # Update local performance metrics
-                metrics = self.tool_performance_metrics[tool_name]
-                metrics.success_rate = performance_data.get("success_rate", metrics.success_rate)
-                metrics.avg_duration = performance_data.get("avg_duration", metrics.avg_duration)
-                metrics.error_count = performance_data.get("error_count", metrics.error_count)
-                
-                logger.debug(f"Updated performance metrics for tool {tool_name}")
-            
-        except Exception as e:
-            logger.error(f"Error handling tool performance update: {e}")
+    async def stop_workflow_monitoring(self) -> None:
+        """Stop the workflow monitoring task."""
+        if self._workflow_monitoring_task and not self._workflow_monitoring_task.done():
+            self._workflow_monitoring_task.cancel()
+            try:
+                await self._workflow_monitoring_task
+            except asyncio.CancelledError:
+                pass
+            self.logger.info("Workflow monitoring stopped")
     
-    async def _handle_new_tool_registration(self, message) -> None:
-        """Handle new tool registration events."""
+    async def _update_operation_metrics(self, op_id: str, event_type: str) -> None:
+        """Update operation metrics for monitoring and learning."""
         try:
-            tool_name = message.data.get("tool_name")
-            
-            if tool_name and tool_name not in self.available_tools:
-                logger.info(f"New tool registered: {tool_name}. Re-running discovery...")
-                
-                # Get the new tool from registry
-                if self.tool_registry:
-                    tool = self.tool_registry.get_tool(tool_name)
-                    if tool:
-                        # Analyze and add the new tool
-                        understanding = await self.analyze_tool_capability(tool)
-                        self.available_tools[tool_name] = tool
-                        self.tool_capabilities[tool_name] = understanding.usage_scenarios
-                        self.tool_performance_metrics[tool_name] = ToolMetrics()
-                        
-                        logger.info(f"Successfully added new tool: {tool_name}")
-            
+            # Implementation for tracking operation metrics
+            # This would update performance data, success rates, etc.
+            pass
         except Exception as e:
-            logger.error(f"Error handling new tool registration: {e}")
+            self.logger.warning(f"Failed to update metrics for operation {op_id}: {e}")
     
-    async def _build_tool_preferences(self) -> None:
-        """Build tool preferences based on agent type and capabilities."""
-        try:
-            if not self.available_tools:
-                logger.warning("No tools available to build preferences")
-                return
+    async def get_workflow_status(self) -> Dict[str, Any]:
+        """
+        Get current workflow execution status.
+        
+        Returns:
+            Dictionary with workflow status information
+        """
+        return {
+            "active_operations": len(self.active_tool_operations),
+            "operation_status": dict(self.operation_status),
+            "monitoring_active": bool(self._workflow_monitoring_task and not self._workflow_monitoring_task.done()),
+            "available_tools": len(self.available_tools),
+            "tool_health": {name: tool.is_available for name, tool in self.available_tools.items()}
+        }
+    
+    async def execute_single_tool_operation(
+        self,
+        tool_name: str,
+        operation: str,
+        parameters: Dict[str, Any],
+        timeout: Optional[float] = None,
+        reasoning: str = ""
+    ) -> Any:
+        """
+        Execute a single tool operation with proper tracking and monitoring.
+        
+        Args:
+            tool_name: Name of the tool to use
+            operation: Operation to perform
+            parameters: Parameters for the operation
+            timeout: Optional timeout in seconds
+            reasoning: Explanation for why this operation is being performed
             
-            # Create preference analysis prompt
-            preference_prompt = f"""
-            Analyze these available tools and build preferences for a {self.config.agent_type} agent:
-            
-            == AGENT PROFILE ==
-            Agent Type: {self.config.agent_type}
-            Capabilities: {[cap.value for cap in self.capabilities]}
-            
-            == AVAILABLE TOOLS ==
-            {json.dumps([{
-                "name": name,
-                "scenarios": scenarios
-            } for name, scenarios in self.tool_capabilities.items()], indent=2)}
-            
-            == PREFERENCE ANALYSIS ==
-            
-            Rank these tools for this agent type and provide:
-            
-            1. **Primary Tools**: Tools this agent should use most frequently (top 3-5)
-            2. **Secondary Tools**: Useful but not primary tools (next 3-5)  
-            3. **Specialized Tools**: Tools for specific scenarios only
-            4. **Preference Scores**: Score each tool 0.0-1.0 for this agent type
-            5. **Usage Priorities**: When to prefer one tool over another
-            6. **Workflow Integration**: How tools work together in typical workflows
-            
-            Consider:
-            - Agent's primary responsibilities
-            - Tool categories that align with agent capabilities
-            - Workflow efficiency and tool synergies
-            - Performance characteristics
-            
-            Format as JSON with keys: primary_tools, secondary_tools, specialized_tools, preference_scores, usage_priorities, workflow_patterns
-            """
-            
-            preference_result = await self.execute_llm_task(
-                user_prompt=preference_prompt,
-                context={
-                    "agent_type": self.config.agent_type,
-                    "capabilities": [cap.value for cap in self.capabilities],
-                    "available_tools": list(self.available_tools.keys())
-                },
-                structured_output=True,
-                include_tools=False
-            )
-            
-            # Extract and store preferences
-            primary_tools = preference_result.get("primary_tools", [])
-            preference_scores = preference_result.get("preference_scores", {})
-            
-            # Create or update tool learning model
-            if not self.tool_learning_model:
-                self.tool_learning_model = ToolLearningModel(
-                    agent_type=self.config.agent_type,
-                    tool_preferences=preference_scores
-                )
-            else:
-                self.tool_learning_model.tool_preferences.update(preference_scores)
-            
-            # Store preferences in memory
-            await self.memory_manager.store_memory(
-                content=f"Tool preferences for {self.config.agent_type} agent: Primary tools: {primary_tools}",
-                metadata={
-                    "type": "tool_preferences", 
-                    "agent_type": self.config.agent_type,
-                    "preference_analysis": preference_result,
-                    "primary_tools": primary_tools
-                },
-                importance=0.9,
-                long_term=True
-            )
-            
-            logger.info(f"Built tool preferences for agent {self.agent_id}: {len(primary_tools)} primary tools")
-            
-        except Exception as e:
-            logger.error(f"Failed to build tool preferences: {e}")
+        Returns:
+            Operation result
+        """
+        from ..models.learning_models import ToolOperation
+        
+        # Create a simple workflow with one operation
+        op = ToolOperation(
+            tool_name=tool_name,
+            operation=operation,
+            parameters=parameters,
+            timeout=timeout
+        )
+        
+        # Log the reasoning
+        self.logger.info(f"Executing tool operation: {tool_name}.{operation}", 
+                        metadata={"reasoning": reasoning, "parameters": parameters})
+        
+        # Execute the workflow
+        result = await self.execute_tool_workflow([op])
+        
+        # Return the result or raise an error
+        if result.errors:
+            error_msg = list(result.errors.values())[0]
+            raise RuntimeError(f"Tool operation failed: {error_msg}")
+        
+        return result.results.get(op.operation_id)
