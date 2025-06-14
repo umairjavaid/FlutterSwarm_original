@@ -27,7 +27,8 @@ from ..config import get_logger as get_config_logger
 from ..core.tools.base_tool import BaseTool
 from ..models.tool_models import (
     ToolUsageEntry, ToolLearningModel, ToolMetrics, ToolUnderstanding,
-    ToolResult, ToolUsagePlan, ToolOperation, ToolDiscovery, TaskOutcome, ToolStatus
+    ToolResult, ToolUsagePlan, ToolOperation, ToolDiscovery, TaskOutcome, ToolStatus,
+    AsyncTask
 )
 
 
@@ -61,15 +62,16 @@ class AgentConfig:
     temperature: float = None
     max_tokens: int = None
     timeout: int = None
+    max_retries: int = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     # Tool integration attributes
-    available_tools: Dict[str, Any] = field(default_factory=dict)
+    available_tools: Dict[str, BaseTool] = field(default_factory=dict)
     tool_capabilities: Dict[str, List[str]] = field(default_factory=dict)
-    tool_usage_history: List[Any] = field(default_factory=list)
-    tool_learning_model: Optional[Any] = None
-    tool_performance_metrics: Dict[str, Any] = field(default_factory=dict)
-    active_tool_operations: Dict[str, Any] = field(default_factory=dict)
+    tool_usage_history: List[ToolUsageEntry] = field(default_factory=list)
+    tool_learning_model: Optional[ToolLearningModel] = None
+    tool_performance_metrics: Dict[str, ToolMetrics] = field(default_factory=dict)
+    active_tool_operations: Dict[str, AsyncTask] = field(default_factory=dict)
     
     def __post_init__(self):
         """Set defaults from global config if not provided."""
@@ -84,6 +86,8 @@ class AgentConfig:
             self.max_tokens = settings.llm.max_tokens
         if self.timeout is None:
             self.timeout = settings.llm.timeout
+        if self.max_retries is None:
+            self.max_retries = getattr(settings.llm, 'max_retries', 3)
 
 
 class BaseAgent(ABC):
@@ -104,6 +108,13 @@ class BaseAgent(ABC):
         event_bus: Communication system for inter-agent messaging
         active_tasks: Currently executing tasks
         capabilities: List of agent capabilities
+        
+        # Tool integration attributes:
+        available_tools: Dict[str, BaseTool] - Tools discovered and available for this agent
+        tool_capabilities: Dict[str, List[str]] - Cached tool capabilities by tool name
+        tool_usage_history: List[ToolUsageEntry] - Detailed usage tracking for learning
+        tool_performance_metrics: Dict[str, ToolMetrics] - Performance metrics by tool name
+        active_tool_operations: Dict[str, AsyncTask] - Currently running tool operations
     """
     
     def __init__(
@@ -154,12 +165,12 @@ class BaseAgent(ABC):
         
         # --- Tool integration ---
         self.tool_registry = None
-        self.available_tools: Dict[str, Any] = {}
+        self.available_tools: Dict[str, BaseTool] = {}
         self.tool_capabilities: Dict[str, List[str]] = {}
         self.tool_usage_history: List[ToolUsageEntry] = []
         self.tool_learning_model: Optional[ToolLearningModel] = None
         self.tool_performance_metrics: Dict[str, ToolMetrics] = {}
-        self.active_tool_operations: Dict[str, asyncio.Task] = {}
+        self.active_tool_operations: Dict[str, AsyncTask] = {}
         
         # Initialize tool system
         asyncio.create_task(self._initialize_tool_system())
@@ -764,7 +775,7 @@ Provide a detailed, actionable response with clear reasoning and specific implem
             understanding = ToolUnderstanding(
                 tool_name=tool.name,
                 agent_id=self.agent_id,
-                capability_summary=analysis_result.get("summary", ""),
+                capabilities_summary=analysis_result.get("summary", ""),
                 usage_scenarios=analysis_result.get("usage_scenarios", []),
                 parameter_patterns=analysis_result.get("parameter_patterns", {}),
                 success_indicators=analysis_result.get("success_indicators", []),
@@ -774,7 +785,7 @@ Provide a detailed, actionable response with clear reasoning and specific implem
             
             # Store in memory for future reference
             await self.memory_manager.store_memory(
-                content=f"Tool analysis: {tool.name} - {understanding.capability_summary}",
+                content=f"Tool analysis: {tool.name} - {understanding.capabilities_summary}",
                 metadata={
                     "type": "tool_understanding",
                     "tool_name": tool.name,
@@ -791,7 +802,7 @@ Provide a detailed, actionable response with clear reasoning and specific implem
             return ToolUnderstanding(
                 tool_name=tool.name,
                 agent_id=self.agent_id,
-                capability_summary=f"Analysis failed: {str(e)}",
+                capabilities_summary=f"Analysis failed: {str(e)}",
                 confidence_level=0.0
             )
 
