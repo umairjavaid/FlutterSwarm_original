@@ -19,6 +19,7 @@ from ..models.project_models import (
     ProjectContext, ArchitecturePattern, PlatformTarget, 
     ProjectType, CodeMetrics
 )
+from ..models.tool_models import ToolOperation
 from ..config import get_logger
 
 logger = get_logger("testing_agent")
@@ -36,6 +37,15 @@ class TestingAgent(BaseAgent):
     - Code coverage analysis and improvement
     - Security testing and vulnerability assessment
     - Test strategy planning and best practices
+    
+    Tool-Driven Capabilities:
+    - Automated test file generation and management
+    - Test execution and reporting
+    - Code coverage analysis
+    - Test data management and fixtures
+    - Performance testing and benchmarking
+    - Mock and stub generation
+    - Test environment setup and teardown
     """
     
     def __init__(
@@ -88,6 +98,15 @@ class TestingAgent(BaseAgent):
             "test_fixtures": "Reusable test data"
         }
         
+        # Test quality metrics
+        self.quality_metrics = {
+            "code_coverage": 0.0,
+            "test_count": 0,
+            "test_pass_rate": 0.0,
+            "mutation_score": 0.0,
+            "test_execution_time": 0.0
+        }
+        
         logger.info(f"Testing Agent {self.agent_id} initialized")
 
     async def get_system_prompt(self) -> str:
@@ -98,52 +117,50 @@ You are the Testing Agent in the FlutterSwarm multi-agent system, specializing i
 CORE EXPERTISE:
 - Flutter testing framework and best practices
 - Unit testing with flutter_test and mockito
-- Widget testing for UI components and interactions
-- Integration testing for end-to-end workflows
-- Test automation and CI/CD integration
-- Code coverage analysis and optimization
+- Widget testing for UI components
+- Integration testing for complete workflows
 - Performance testing and benchmarking
 - Security testing and vulnerability assessment
-- Test-driven development (TDD) methodologies
+- Test automation and CI/CD integration
+- Code coverage analysis and improvement
 
-TESTING RESPONSIBILITIES:
-1. Test Strategy: Design comprehensive testing strategies for Flutter applications
-2. Unit Testing: Create thorough unit tests for business logic and utilities
-3. Widget Testing: Develop widget tests for UI components and user interactions
-4. Integration Testing: Plan and implement end-to-end integration tests
-5. Test Automation: Set up automated testing pipelines and CI/CD integration
-6. Quality Assurance: Ensure code quality through systematic testing approaches
-7. Performance Testing: Create performance benchmarks and stress tests
-8. Security Testing: Identify and test for security vulnerabilities
+TOOL-DRIVEN APPROACH:
+You use specialized tools to:
+- Generate comprehensive test files and test data
+- Execute tests and analyze results
+- Manage test environments and dependencies
+- Create mocks, stubs, and test fixtures
+- Measure code coverage and quality metrics
+- Set up automated testing pipelines
+- Monitor test performance and reliability
 
-TESTING PRINCIPLES:
-- Write clear, maintainable, and reliable tests
-- Follow the testing pyramid: more unit tests, fewer integration tests
-- Use appropriate test doubles (mocks, stubs, fakes) for isolation
-- Implement comprehensive error scenario testing
-- Ensure high code coverage with meaningful tests
-- Follow arrange-act-assert or given-when-then patterns
-- Create deterministic and repeatable tests
-- Test edge cases and boundary conditions
+RESPONSIBILITIES:
+1. Test Strategy Development
+   - Analyze project requirements and create test plans
+   - Define testing scope and priorities
+   - Establish testing standards and guidelines
+   - Plan test automation strategies
 
-FLUTTER TESTING APPROACH:
-1. Unit Tests: Test business logic, utilities, and data models in isolation
-2. Widget Tests: Test individual widgets and their behavior
-3. Integration Tests: Test complete user workflows and app functionality
-4. Golden Tests: Visual regression testing for UI consistency
-5. Performance Tests: Benchmark critical paths and memory usage
-6. Accessibility Tests: Ensure app accessibility compliance
+2. Test Creation and Management
+   - Generate unit tests for business logic
+   - Create widget tests for UI components
+   - Develop integration tests for user workflows
+   - Implement performance and security tests
+   - Maintain test data and fixtures
 
-TEST GENERATION STRATEGY:
-1. Analyze code structure and identify testable components
-2. Create comprehensive test suites covering all scenarios
-3. Generate appropriate mocks and test data
-4. Include positive, negative, and edge case scenarios
-5. Ensure proper test isolation and cleanup
-6. Add meaningful assertions and error messages
-7. Consider maintainability and test readability
+3. Quality Assurance
+   - Monitor code coverage and test quality
+   - Identify testing gaps and blind spots
+   - Recommend improvements to test suite
+   - Ensure test maintainability and reliability
 
-Always generate complete, executable test code with proper imports, setup, and teardown procedures.
+4. Test Automation
+   - Set up CI/CD testing pipelines
+   - Configure automated test execution
+   - Implement test reporting and notifications
+   - Manage test environments and dependencies
+
+Always reason through testing decisions using LLM analysis, then use tools to implement your testing strategies.
 """
 
     async def get_capabilities(self) -> List[str]:
@@ -477,21 +494,669 @@ Please provide comprehensive integration testing plan including:
 Provide complete integration test suite with setup and execution instructions.
 """
 
-    # Helper methods for patterns and guidelines
-    def _get_widget_testing_patterns(self) -> Dict[str, Any]:
-        """Get widget testing patterns and best practices."""
+    # Tool-driven test management methods
+    async def create_comprehensive_test_suite(
+        self, 
+        project_context: ProjectContext
+    ) -> Dict[str, Any]:
+        """Create a comprehensive test suite for the Flutter project."""
+        logger.info(f"Creating comprehensive test suite for project: {project_context.project_name}")
+        
+        try:
+            # Analyze project structure for test planning
+            analysis_prompt = f"""
+            Analyze this Flutter project for comprehensive testing:
+            
+            Project: {project_context.project_name}
+            Type: {project_context.project_type}
+            Architecture: {project_context.architecture_pattern}
+            Platforms: {project_context.target_platforms}
+            
+            Analyze the project structure and determine:
+            1. What types of tests are needed (unit, widget, integration)
+            2. Which components require testing priority
+            3. Test data and fixture requirements
+            4. Mock and stub generation needs
+            5. Performance testing requirements
+            6. Security testing considerations
+            
+            Provide a detailed test strategy with specific recommendations.
+            """
+            
+            strategy_response = await self.llm_client.chat_completion(
+                messages=[{"role": "user", "content": analysis_prompt}],
+                temperature=0.3
+            )
+            
+            test_strategy = strategy_response.choices[0].message.content
+            
+            # Use file system tool to analyze existing code structure
+            if self.tool_registry:
+                file_tool = await self.tool_registry.get_tool("file_system_tool")
+                if file_tool:
+                    # Analyze project structure
+                    analysis_result = await file_tool.execute(ToolOperation(
+                        operation_type="analyze_project_structure",
+                        parameters={
+                            "project_path": project_context.project_path,
+                            "include_test_analysis": True
+                        }
+                    ))
+                    
+                    if analysis_result.success:
+                        project_structure = analysis_result.result
+                        
+                        # Generate test files based on analysis
+                        test_results = await self._generate_test_files(
+                            project_context, project_structure, test_strategy
+                        )
+                        
+                        # Set up test environment
+                        env_result = await self._setup_test_environment(project_context)
+                        
+                        # Create test data and fixtures
+                        fixtures_result = await self._create_test_fixtures(project_context)
+                        
+                        return {
+                            "strategy": test_strategy,
+                            "project_analysis": project_structure,
+                            "test_files_created": test_results,
+                            "environment_setup": env_result,
+                            "fixtures_created": fixtures_result,
+                            "status": "comprehensive_test_suite_created"
+                        }
+            
+            return {"error": "File system tool not available", "status": "failed"}
+            
+        except Exception as e:
+            logger.error(f"Failed to create comprehensive test suite: {e}")
+            return {"error": str(e), "status": "failed"}
+
+    async def _generate_test_files(
+        self, 
+        project_context: ProjectContext,
+        project_structure: Dict[str, Any],
+        test_strategy: str
+    ) -> Dict[str, Any]:
+        """Generate test files based on project analysis and strategy."""
+        generated_tests = {}
+        
+        if not self.tool_registry:
+            return {"error": "Tool registry not available"}
+        
+        file_tool = await self.tool_registry.get_tool("file_system_tool")
+        if not file_tool:
+            return {"error": "File system tool not available"}
+        
+        # Generate unit tests for business logic
+        lib_files = project_structure.get("lib_files", [])
+        for file_info in lib_files:
+            if self._should_create_unit_test(file_info):
+                test_content = await self._generate_unit_test_content(
+                    file_info, test_strategy
+                )
+                
+                test_file_path = self._get_test_file_path(
+                    file_info["path"], "unit"
+                )
+                
+                result = await file_tool.execute(ToolOperation(
+                    operation_type="create_file",
+                    parameters={
+                        "file_path": test_file_path,
+                        "content": test_content,
+                        "template_type": "dart_test",
+                        "ensure_directory": True
+                    }
+                ))
+                
+                if result.success:
+                    generated_tests[f"unit_{file_info['name']}"] = test_file_path
+        
+        # Generate widget tests for UI components
+        widget_files = [f for f in lib_files if self._is_widget_file(f)]
+        for widget_file in widget_files:
+            test_content = await self._generate_widget_test_content(
+                widget_file, test_strategy
+            )
+            
+            test_file_path = self._get_test_file_path(
+                widget_file["path"], "widget"
+            )
+            
+            result = await file_tool.execute(ToolOperation(
+                operation_type="create_file",
+                parameters={
+                    "file_path": test_file_path,
+                    "content": test_content,
+                    "template_type": "dart_test",
+                    "ensure_directory": True
+                }
+            ))
+            
+            if result.success:
+                generated_tests[f"widget_{widget_file['name']}"] = test_file_path
+        
+        # Generate integration tests for main workflows
+        integration_tests = await self._generate_integration_tests(
+            project_context, test_strategy
+        )
+        generated_tests.update(integration_tests)
+        
+        return generated_tests
+
+    async def _generate_unit_test_content(
+        self, 
+        file_info: Dict[str, Any], 
+        strategy: str
+    ) -> str:
+        """Generate unit test content for a Dart file."""
+        prompt = f"""
+        Generate comprehensive unit tests for this Dart file:
+        
+        File: {file_info['path']}
+        Content Preview: {file_info.get('content_preview', 'N/A')}
+        
+        Test Strategy Context: {strategy}
+        
+        Create unit tests that:
+        1. Test all public methods and functions
+        2. Cover edge cases and error conditions
+        3. Use appropriate mocking for dependencies
+        4. Follow Flutter testing best practices
+        5. Include proper test descriptions and organization
+        6. Use arrange-act-assert pattern
+        
+        Generate the complete Dart test file content.
+        """
+        
+        response = await self.llm_client.chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+        
+        return response.choices[0].message.content
+
+    async def _generate_widget_test_content(
+        self, 
+        widget_file: Dict[str, Any], 
+        strategy: str
+    ) -> str:
+        """Generate widget test content for a Flutter widget."""
+        prompt = f"""
+        Generate comprehensive widget tests for this Flutter widget file:
+        
+        File: {widget_file['path']}
+        Content Preview: {widget_file.get('content_preview', 'N/A')}
+        
+        Test Strategy Context: {strategy}
+        
+        Create widget tests that:
+        1. Test widget rendering and appearance
+        2. Test user interactions (taps, gestures, input)
+        3. Test state changes and updates
+        4. Test accessibility features
+        5. Test error states and edge cases
+        6. Use appropriate test helpers and utilities
+        7. Include golden tests if applicable
+        
+        Generate the complete Dart widget test file content.
+        """
+        
+        response = await self.llm_client.chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+        
+        return response.choices[0].message.content
+
+    async def _generate_integration_tests(
+        self, 
+        project_context: ProjectContext, 
+        strategy: str
+    ) -> Dict[str, Any]:
+        """Generate integration tests for main application workflows."""
+        integration_tests = {}
+        
+        if not self.tool_registry:
+            return integration_tests
+        
+        file_tool = await self.tool_registry.get_tool("file_system_tool")
+        if not file_tool:
+            return integration_tests
+        
+        # Define common integration test scenarios
+        test_scenarios = [
+            "app_startup_flow",
+            "user_authentication_flow",
+            "main_navigation_flow",
+            "data_persistence_flow",
+            "network_operations_flow"
+        ]
+        
+        for scenario in test_scenarios:
+            test_content = await self._generate_integration_test_scenario(
+                scenario, project_context, strategy
+            )
+            
+            test_file_path = f"{project_context.project_path}/integration_test/{scenario}_test.dart"
+            
+            result = await file_tool.execute(ToolOperation(
+                operation_type="create_file",
+                parameters={
+                    "file_path": test_file_path,
+                    "content": test_content,
+                    "template_type": "dart_test",
+                    "ensure_directory": True
+                }
+            ))
+            
+            if result.success:
+                integration_tests[scenario] = test_file_path
+        
+        return integration_tests
+
+    async def _generate_integration_test_scenario(
+        self, 
+        scenario: str, 
+        project_context: ProjectContext, 
+        strategy: str
+    ) -> str:
+        """Generate integration test content for a specific scenario."""
+        prompt = f"""
+        Generate a comprehensive integration test for this scenario:
+        
+        Scenario: {scenario}
+        Project: {project_context.project_name}
+        Type: {project_context.project_type}
+        
+        Test Strategy Context: {strategy}
+        
+        Create an integration test that:
+        1. Tests the complete user workflow for this scenario
+        2. Includes proper setup and teardown
+        3. Tests across multiple screens/widgets
+        4. Verifies data persistence and state management
+        5. Handles network operations if applicable
+        6. Tests error handling and recovery
+        7. Uses flutter_driver or integration_test framework
+        
+        Generate the complete Dart integration test file content.
+        """
+        
+        response = await self.llm_client.chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+        
+        return response.choices[0].message.content
+
+    async def _setup_test_environment(
+        self, 
+        project_context: ProjectContext
+    ) -> Dict[str, Any]:
+        """Set up the testing environment and dependencies."""
+        if not self.tool_registry:
+            return {"error": "Tool registry not available"}
+        
+        file_tool = await self.tool_registry.get_tool("file_system_tool")
+        if not file_tool:
+            return {"error": "File system tool not available"}
+        
+        # Create test configuration files
+        test_configs = {
+            "test_helper.dart": await self._generate_test_helper_content(project_context),
+            "mock_data.dart": await self._generate_mock_data_content(project_context),
+            "test_utilities.dart": await self._generate_test_utilities_content(project_context)
+        }
+        
+        created_files = {}
+        for filename, content in test_configs.items():
+            file_path = f"{project_context.project_path}/test/{filename}"
+            
+            result = await file_tool.execute(ToolOperation(
+                operation_type="create_file",
+                parameters={
+                    "file_path": file_path,
+                    "content": content,
+                    "template_type": "dart_helper",
+                    "ensure_directory": True
+                }
+            ))
+            
+            if result.success:
+                created_files[filename] = file_path
+        
+        return {"created_files": created_files}
+
+    async def _create_test_fixtures(
+        self, 
+        project_context: ProjectContext
+    ) -> Dict[str, Any]:
+        """Create test fixtures and sample data."""
+        if not self.tool_registry:
+            return {"error": "Tool registry not available"}
+        
+        file_tool = await self.tool_registry.get_tool("file_system_tool")
+        if not file_tool:
+            return {"error": "File system tool not available"}
+        
+        # Generate test data fixtures
+        fixtures = {
+            "sample_users.json": await self._generate_user_fixtures(),
+            "test_responses.json": await self._generate_api_fixtures(),
+            "widget_test_data.dart": await self._generate_widget_fixtures()
+        }
+        
+        created_fixtures = {}
+        for filename, content in fixtures.items():
+            file_path = f"{project_context.project_path}/test/fixtures/{filename}"
+            
+            result = await file_tool.execute(ToolOperation(
+                operation_type="create_file",
+                parameters={
+                    "file_path": file_path,
+                    "content": content,
+                    "ensure_directory": True
+                }
+            ))
+            
+            if result.success:
+                created_fixtures[filename] = file_path
+        
+        return {"created_fixtures": created_fixtures}
+
+    async def run_test_suite(
+        self, 
+        project_context: ProjectContext,
+        test_types: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Run the complete test suite and analyze results."""
+        logger.info(f"Running test suite for project: {project_context.project_name}")
+        
+        if not self.tool_registry:
+            return {"error": "Tool registry not available"}
+        
+        # Use process tool to run tests
+        process_tool = await self.tool_registry.get_tool("process_tool")
+        flutter_tool = await self.tool_registry.get_tool("flutter_sdk_tool")
+        
+        if not process_tool or not flutter_tool:
+            return {"error": "Required tools not available"}
+        
+        test_results = {}
+        
+        # Run different types of tests
+        test_commands = {
+            "unit_tests": "flutter test",
+            "widget_tests": "flutter test test/widget",
+            "integration_tests": "flutter test integration_test",
+            "coverage": "flutter test --coverage"
+        }
+        
+        target_tests = test_types or list(test_commands.keys())
+        
+        for test_type in target_tests:
+            if test_type in test_commands:
+                result = await flutter_tool.execute(ToolOperation(
+                    operation_type="test",
+                    parameters={
+                        "project_path": project_context.project_path,
+                        "test_type": test_type,
+                        "with_coverage": test_type == "coverage"
+                    }
+                ))
+                
+                test_results[test_type] = {
+                    "success": result.success,
+                    "output": result.result,
+                    "execution_time": result.execution_time
+                }
+        
+        # Analyze test results and coverage
+        analysis = await self._analyze_test_results(test_results, project_context)
+        
         return {
-            "test_widgets": ["testWidgets", "WidgetTester", "pumpWidget"],
-            "finders": ["find.text", "find.byKey", "find.byType", "find.byIcon"],
-            "interactions": ["tap", "enterText", "drag", "pinch", "scroll"],
-            "verification": ["expect", "findsOneWidget", "findsNothing", "matchesGoldenFile"]
+            "test_results": test_results,
+            "analysis": analysis,
+            "recommendations": await self._generate_test_recommendations(analysis)
         }
 
-    def _get_integration_patterns(self) -> Dict[str, Any]:
-        """Get integration testing patterns."""
-        return {
-            "test_driver": ["FlutterDriver", "integration_test", "flutter_driver"],
-            "page_objects": ["Page Object Model", "Element locators", "Action methods"],
-            "test_flows": ["User journeys", "Feature workflows", "Cross-platform flows"],
-            "data_management": ["Test fixtures", "Mock services", "Database seeding"]
-        }
+    async def _analyze_test_results(
+        self, 
+        test_results: Dict[str, Any],
+        project_context: ProjectContext
+    ) -> Dict[str, Any]:
+        """Analyze test results and extract metrics."""
+        analysis_prompt = f"""
+        Analyze these Flutter test results:
+        
+        Project: {project_context.project_name}
+        Test Results: {json.dumps(test_results, indent=2)}
+        
+        Provide analysis covering:
+        1. Overall test success rate
+        2. Code coverage metrics
+        3. Performance metrics
+        4. Test reliability and flakiness
+        5. Areas needing attention
+        6. Quality improvements needed
+        
+        Return structured analysis with specific metrics and recommendations.
+        """
+        
+        response = await self.llm_client.chat_completion(
+            messages=[{"role": "user", "content": analysis_prompt}],
+            temperature=0.2
+        )
+        
+        return {"llm_analysis": response.choices[0].message.content}
+
+    async def _generate_test_recommendations(
+        self, 
+        analysis: Dict[str, Any]
+    ) -> List[str]:
+        """Generate specific recommendations for test improvements."""
+        recommendations_prompt = f"""
+        Based on this test analysis, provide specific actionable recommendations:
+        
+        Analysis: {json.dumps(analysis, indent=2)}
+        
+        Generate 5-10 specific recommendations for:
+        1. Improving test coverage
+        2. Enhancing test quality
+        3. Optimizing test performance
+        4. Reducing test flakiness
+        5. Better test organization
+        
+        Make recommendations specific and actionable.
+        """
+        
+        response = await self.llm_client.chat_completion(
+            messages=[{"role": "user", "content": recommendations_prompt}],
+            temperature=0.3
+        )
+        
+        recommendations_text = response.choices[0].message.content
+        return [rec.strip() for rec in recommendations_text.split('\n') if rec.strip()]
+
+    # Helper methods for test file analysis
+    def _should_create_unit_test(self, file_info: Dict[str, Any]) -> bool:
+        """Determine if a file should have unit tests."""
+        file_path = file_info.get("path", "")
+        file_name = file_info.get("name", "")
+        
+        # Skip test files, generated files, and UI-only files
+        if (file_path.endswith("_test.dart") or 
+            file_path.endswith(".g.dart") or
+            file_name.startswith("main.dart")):
+            return False
+        
+        # Include business logic, models, services, utilities
+        include_patterns = [
+            "/models/", "/services/", "/utils/", "/repositories/",
+            "/controllers/", "/providers/", "/blocs/", "/cubits/"
+        ]
+        
+        return any(pattern in file_path for pattern in include_patterns)
+
+    def _is_widget_file(self, file_info: Dict[str, Any]) -> bool:
+        """Determine if a file contains Flutter widgets."""
+        file_path = file_info.get("path", "")
+        content_preview = file_info.get("content_preview", "")
+        
+        # Check for widget-related patterns
+        widget_patterns = [
+            "extends StatelessWidget", "extends StatefulWidget",
+            "extends Widget", "class.*Widget", "/widgets/", "/screens/", "/pages/"
+        ]
+        
+        return any(pattern in content_preview or pattern in file_path 
+                  for pattern in widget_patterns)
+
+    def _get_test_file_path(self, source_file_path: str, test_type: str) -> str:
+        """Generate test file path for a source file."""
+        # Convert lib path to test path
+        test_path = source_file_path.replace("/lib/", f"/test/{test_type}/")
+        
+        # Add _test suffix
+        if test_path.endswith(".dart"):
+            test_path = test_path[:-5] + "_test.dart"
+        
+        return test_path
+
+    # Test content generation helper methods
+    async def _generate_test_helper_content(self, project_context: ProjectContext) -> str:
+        """Generate test helper utilities."""
+        return """
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// Test helper utilities for Flutter tests
+class TestHelper {
+  /// Create a testable widget with MaterialApp wrapper
+  static Widget makeTestableWidget(Widget child) {
+    return MaterialApp(
+      home: child,
+    );
+  }
+  
+  /// Pump and settle with custom duration
+  static Future<void> pumpAndSettleWithDelay(
+    WidgetTester tester, [
+    Duration delay = const Duration(milliseconds: 100)
+  ]) async {
+    await tester.pump(delay);
+    await tester.pumpAndSettle();
+  }
+  
+  /// Find widget by key safely
+  static Finder findByKeyString(String key) {
+    return find.byKey(Key(key));
+  }
+  
+  /// Verify widget exists and is visible
+  static void verifyWidgetExists(Finder finder) {
+    expect(finder, findsOneWidget);
+  }
+  
+  /// Verify text content
+  static void verifyTextContent(String text) {
+    expect(find.text(text), findsOneWidget);
+  }
+}
+"""
+
+    async def _generate_mock_data_content(self, project_context: ProjectContext) -> str:
+        """Generate mock data utilities."""
+        return """
+/// Mock data utilities for testing
+class MockData {
+  static const Map<String, dynamic> sampleUser = {
+    'id': '123',
+    'name': 'Test User',
+    'email': 'test@example.com',
+    'avatar': 'https://example.com/avatar.jpg',
+  };
+  
+  static const List<Map<String, dynamic>> sampleUsers = [
+    {
+      'id': '1',
+      'name': 'Alice Johnson',
+      'email': 'alice@example.com',
+    },
+    {
+      'id': '2', 
+      'name': 'Bob Smith',
+      'email': 'bob@example.com',
+    },
+  ];
+  
+  static const Map<String, dynamic> sampleApiResponse = {
+    'status': 'success',
+    'data': sampleUser,
+    'message': 'User fetched successfully',
+  };
+  
+  static const Map<String, dynamic> sampleErrorResponse = {
+    'status': 'error',
+    'message': 'User not found',
+    'code': 404,
+  };
+}
+"""
+
+    async def _generate_test_utilities_content(self, project_context: ProjectContext) -> str:
+        """Generate test utilities and custom matchers."""
+        return """
+import 'package:flutter_test/flutter_test.dart';
+
+/// Custom matchers for Flutter tests
+Matcher hasWidgetCount(int count) {
+  return _HasWidgetCount(count);
+}
+
+class _HasWidgetCount extends Matcher {
+  final int expectedCount;
+  
+  _HasWidgetCount(this.expectedCount);
+  
+  @override
+  bool matches(item, Map matchState) {
+    if (item is Finder) {
+      return item.evaluate().length == expectedCount;
+    }
+    return false;
+  }
+  
+  @override
+  Description describe(Description description) {
+    return description.add('has exactly $expectedCount widgets');
+  }
+}
+
+/// Test utilities for common operations
+class TestUtils {
+  /// Wait for animation to complete
+  static Future<void> waitForAnimation(WidgetTester tester) async {
+    await tester.pumpAndSettle(const Duration(seconds: 1));
+  }
+  
+  /// Simulate network delay
+  static Future<void> simulateNetworkDelay() async {
+    await Future.delayed(const Duration(milliseconds: 500));
+  }
+  
+  /// Create mock HTTP response
+  static Map<String, dynamic> createMockResponse({
+    required int statusCode,
+    required Map<String, dynamic> body,
+  }) {
+    return {
+      'statusCode': statusCode,
+      'body': body,
+      'headers': {'content-type': 'application/json'},
+    };
+  }
+}
+"""
