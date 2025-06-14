@@ -631,38 +631,81 @@ Provide a detailed, actionable response with clear reasoning and specific implem
         """
         Discover and understand available tools.
         
-        This method queries the tool registry, analyzes each tool's capabilities,
-        and builds the agent's understanding of what tools can do.
+        This method:
+        1. Queries tool registry for all registered tools
+        2. For each tool, calls get_capabilities() and analyzes
+        3. Stores structured understanding in agent memory
+        4. Subscribes to tool availability changes via event bus
+        5. Builds tool preferences based on agent type
         """
         if not self.tool_registry:
             logger.warning("Tool registry not available for tool discovery")
             return
         
         try:
-            # Get all available tools
-            available_tools = self.tool_registry.get_available_tools()
+            logger.info(f"Agent {self.agent_id} starting tool discovery...")
             
+            # Get all available tools from registry
+            available_tools = self.tool_registry.get_available_tools()
+            logger.info(f"Found {len(available_tools)} available tools in registry")
+            
+            # Analyze each tool and build understanding
             for tool in available_tools:
-                # Analyze tool capability
-                understanding = await self.analyze_tool_capability(tool)
-                
-                # Store tool information
-                self.available_tools[tool.name] = tool
-                self.tool_capabilities[tool.name] = understanding.usage_scenarios
-                
-                # Initialize performance metrics
-                self.tool_performance_metrics[tool.name] = ToolMetrics()
-                
-            logger.info(f"Discovered {len(self.available_tools)} tools for agent {self.agent_id}")
+                try:
+                    # Analyze tool capability with LLM reasoning
+                    understanding = await self.analyze_tool_capability(tool)
+                    
+                    # Store tool information
+                    self.available_tools[tool.name] = tool
+                    self.tool_capabilities[tool.name] = understanding.usage_scenarios
+                    
+                    # Initialize performance metrics
+                    self.tool_performance_metrics[tool.name] = ToolMetrics()
+                    
+                    # Store understanding in memory for persistence
+                    await self.memory_manager.store_memory(
+                        content=f"Tool discovered: {tool.name} - {understanding.capabilities_summary}",
+                        metadata={
+                            "type": "tool_discovery",
+                            "tool_name": tool.name,
+                            "agent_type": self.config.agent_type,
+                            "usage_scenarios": understanding.usage_scenarios,
+                            "confidence": understanding.confidence_level
+                        },
+                        importance=0.8,
+                        long_term=True
+                    )
+                    
+                    logger.info(f"Successfully analyzed tool: {tool.name}")
+                    
+                except Exception as tool_error:
+                    logger.error(f"Failed to analyze tool {tool.name}: {tool_error}")
+                    # Still register the tool with basic info
+                    self.available_tools[tool.name] = tool
+                    self.tool_capabilities[tool.name] = ["basic_usage"]
+                    self.tool_performance_metrics[tool.name] = ToolMetrics()
+            
+            # Subscribe to tool availability changes via event bus
+            await self._subscribe_to_tool_events()
+            
+            # Build tool preferences based on agent type
+            await self._build_tool_preferences()
+            
+            logger.info(f"Agent {self.agent_id} discovered {len(self.available_tools)} tools")
             
             # Share discovery insights with other agents
             discovery_insight = ToolDiscovery(
                 agent_id=self.agent_id,
                 discovery_type="tool_discovery",
                 tool_names=list(self.available_tools.keys()),
-                description=f"Agent {self.agent_id} discovered {len(self.available_tools)} available tools",
+                description=f"Agent {self.agent_id} ({self.config.agent_type}) discovered {len(self.available_tools)} available tools",
                 confidence=0.9,
-                applicability=[self.config.agent_type]
+                applicability=[self.config.agent_type],
+                evidence={
+                    "tools_analyzed": len(self.available_tools),
+                    "agent_capabilities": [cap.value for cap in self.capabilities],
+                    "preferred_tools": list(self.available_tools.keys())[:5]  # Top 5
+                }
             )
             
             await self.share_tool_discovery(discovery_insight)
@@ -674,6 +717,13 @@ Provide a detailed, actionable response with clear reasoning and specific implem
         """
         Deep analysis of a tool's capabilities through LLM reasoning.
         
+        This method:
+        1. Parses capability description for LLM understanding
+        2. Generates usage scenarios relevant to agent's role
+        3. Identifies parameter patterns and validation rules
+        4. Maps tool capabilities to agent's responsibilities
+        5. Creates mental model for future tool usage decisions
+        
         Args:
             tool: Tool to analyze
             
@@ -681,9 +731,12 @@ Provide a detailed, actionable response with clear reasoning and specific implem
             ToolUnderstanding with structured analysis
         """
         try:
-            # Get tool capabilities
+            logger.info(f"Analyzing capabilities for tool: {tool.name}")
+            
+            # Get comprehensive tool information
             capabilities = await tool.get_capabilities()
             usage_examples = await tool.get_usage_examples()
+            health_status = await tool.get_health_status()
             
             # Convert capabilities to JSON-serializable format
             def serialize_capabilities(caps):
@@ -736,74 +789,141 @@ Provide a detailed, actionable response with clear reasoning and specific implem
 
             serializable_capabilities = serialize_capabilities(capabilities)
             
-            # Use LLM to understand the tool
+            # Create comprehensive analysis prompt for LLM
             analysis_prompt = f"""
-            Analyze this tool and understand its capabilities:
+            Analyze this development tool and understand its capabilities for a {self.config.agent_type} agent:
             
+            == TOOL INFORMATION ==
             Tool Name: {tool.name}
             Description: {tool.description}
             Version: {tool.version}
             Category: {tool.category.value}
+            Health Status: {health_status.get('status', 'unknown')}
             
-            Capabilities:
-            {json.dumps(serializable_capabilities.get('available_operations', [])[:5], indent=2)}  # First 5 operations
+            == AVAILABLE OPERATIONS ==
+            {json.dumps(serializable_capabilities.get('available_operations', [])[:10], indent=2)}
             
-            Usage Examples:
-            {json.dumps(usage_examples[:3], indent=2)}  # First 3 examples
+            == USAGE EXAMPLES ==
+            {json.dumps(usage_examples[:5], indent=2)}
             
-            Provide analysis including:
-            1. Summary of what this tool does
-            2. When to use this tool (usage scenarios)
-            3. What parameters it typically needs
-            4. What success looks like
-            5. Common failure patterns to watch for
-            6. How this tool relates to my role as a {self.config.agent_type} agent
+            == AGENT CONTEXT ==
+            Agent Type: {self.config.agent_type}
+            Agent Capabilities: {[cap.value for cap in self.capabilities]}
             
-            Format response as structured data.
+            == ANALYSIS REQUIREMENTS ==
+            
+            Provide a comprehensive analysis including:
+            
+            1. **Capability Summary**: What does this tool do in 2-3 sentences?
+            
+            2. **Usage Scenarios**: List 5-8 specific scenarios when a {self.config.agent_type} agent should use this tool
+            
+            3. **Parameter Patterns**: Identify common parameter patterns and their typical values:
+               - Required parameters for each operation
+               - Optional parameters and defaults
+               - Parameter validation rules
+               - Common parameter combinations
+            
+            4. **Success Indicators**: What indicates successful tool usage?
+               - Expected return values
+               - Success status patterns
+               - Performance benchmarks
+            
+            5. **Failure Patterns**: Common failure scenarios to watch for:
+               - Input validation errors
+               - Resource availability issues
+               - Permission problems
+               - Timeout conditions
+            
+            6. **Agent Responsibility Mapping**: How does this tool map to my responsibilities as a {self.config.agent_type} agent?
+               - Which of my capabilities does this tool support?
+               - When should I prioritize this tool over alternatives?
+               - How does this tool integrate with my workflow?
+            
+            7. **Decision Factors**: What factors should influence when to use this tool?
+               - Project context requirements
+               - Performance considerations
+               - Resource availability
+               - Alternative tool comparisons
+            
+            Format your response as valid JSON with keys: summary, usage_scenarios, parameter_patterns, success_indicators, failure_patterns, responsibility_mapping, decision_factors
             """
             
+            # Get LLM analysis with structured output
             analysis_result = await self.execute_llm_task(
                 user_prompt=analysis_prompt,
                 context={
                     "tool_name": tool.name,
                     "agent_type": self.config.agent_type,
-                    "capabilities": serializable_capabilities
-                }
+                    "capabilities": serializable_capabilities,
+                    "health_status": health_status,
+                    "examples": usage_examples
+                },
+                structured_output=True,
+                include_tools=False  # Don't include tools when analyzing tools
             )
             
-            # Create tool understanding
+            # Extract analysis components with robust error handling
+            summary = analysis_result.get("summary", f"Tool for {tool.category.value} operations")
+            usage_scenarios = analysis_result.get("usage_scenarios", [f"General {tool.category.value} tasks"])
+            parameter_patterns = analysis_result.get("parameter_patterns", {})
+            success_indicators = analysis_result.get("success_indicators", ["Operation completes successfully"])
+            failure_patterns = analysis_result.get("failure_patterns", ["Unknown errors"])
+            
+            # Ensure usage_scenarios is a list
+            if isinstance(usage_scenarios, str):
+                usage_scenarios = [usage_scenarios]
+            elif not isinstance(usage_scenarios, list):
+                usage_scenarios = [f"General {tool.category.value} tasks"]
+            
+            # Calculate confidence based on analysis quality
+            confidence = 0.8
+            if len(usage_scenarios) >= 3 and parameter_patterns and success_indicators:
+                confidence = 0.9
+            elif "error" in str(analysis_result).lower() or not analysis_result:
+                confidence = 0.4
+            
+            # Create comprehensive tool understanding
             understanding = ToolUnderstanding(
                 tool_name=tool.name,
                 agent_id=self.agent_id,
-                capabilities_summary=analysis_result.get("summary", ""),
-                usage_scenarios=analysis_result.get("usage_scenarios", []),
-                parameter_patterns=analysis_result.get("parameter_patterns", {}),
-                success_indicators=analysis_result.get("success_indicators", []),
-                failure_patterns=analysis_result.get("failure_patterns", []),
-                confidence_level=0.8
+                capabilities_summary=summary,
+                usage_scenarios=usage_scenarios,
+                parameter_patterns=parameter_patterns,
+                success_indicators=success_indicators,
+                failure_patterns=failure_patterns,
+                confidence_level=confidence
             )
             
-            # Store in memory for future reference
+            # Store detailed analysis in memory for future reference
             await self.memory_manager.store_memory(
-                content=f"Tool analysis: {tool.name} - {understanding.capabilities_summary}",
+                content=f"Detailed tool analysis: {tool.name}\nSummary: {summary}\nScenarios: {usage_scenarios}",
                 metadata={
                     "type": "tool_understanding",
                     "tool_name": tool.name,
-                    "agent_type": self.config.agent_type
+                    "agent_type": self.config.agent_type,
+                    "analysis_result": analysis_result,
+                    "confidence": confidence
                 },
-                importance=0.7,
+                importance=0.8,
                 long_term=True
             )
             
+            logger.info(f"Completed analysis for tool {tool.name} with confidence {confidence}")
             return understanding
             
         except Exception as e:
             logger.error(f"Tool capability analysis failed for {tool.name}: {e}")
+            # Return basic understanding on failure
             return ToolUnderstanding(
                 tool_name=tool.name,
                 agent_id=self.agent_id,
-                capabilities_summary=f"Analysis failed: {str(e)}",
-                confidence_level=0.0
+                capabilities_summary=f"Analysis failed: {str(e)}. Basic tool for {getattr(tool, 'category', 'unknown')} operations.",
+                usage_scenarios=[f"Basic {getattr(tool, 'category', 'general')} tasks"],
+                parameter_patterns={},
+                success_indicators=["Operation completes"],
+                failure_patterns=["Analysis unavailable"],
+                confidence_level=0.1
             )
 
     # --- Intelligent Tool Usage ---
@@ -1150,3 +1270,179 @@ Provide a detailed, actionable response with clear reasoning and specific implem
             await tool.record_usage(
                 self.agent_id, operation, parameters, result, usage_entry.context
             )
+    
+    # --- Tool Discovery Helper Methods ---
+    
+    async def _subscribe_to_tool_events(self) -> None:
+        """Subscribe to tool availability and performance events via event bus."""
+        try:
+            # Subscribe to tool availability changes
+            await self.event_bus.subscribe(
+                "tool.availability.*",
+                self._handle_tool_availability_change,
+                subscriber_id=f"{self.agent_id}_tool_availability"
+            )
+            
+            # Subscribe to tool performance updates
+            await self.event_bus.subscribe(
+                "tool.performance.*", 
+                self._handle_tool_performance_update,
+                subscriber_id=f"{self.agent_id}_tool_performance"
+            )
+            
+            # Subscribe to new tool registrations
+            await self.event_bus.subscribe(
+                "tool.registered.*",
+                self._handle_new_tool_registration,
+                subscriber_id=f"{self.agent_id}_tool_registration"
+            )
+            
+            logger.info(f"Agent {self.agent_id} subscribed to tool events")
+            
+        except Exception as e:
+            logger.error(f"Failed to subscribe to tool events: {e}")
+    
+    async def _handle_tool_availability_change(self, message) -> None:
+        """Handle tool availability change events."""
+        try:
+            tool_name = message.data.get("tool_name")
+            is_available = message.data.get("is_available", False)
+            
+            if tool_name in self.available_tools:
+                if not is_available:
+                    logger.warning(f"Tool {tool_name} became unavailable for agent {self.agent_id}")
+                    # Update availability but keep the tool for potential recovery
+                    self.tool_capabilities[tool_name] = ["unavailable"]
+                else:
+                    logger.info(f"Tool {tool_name} became available again for agent {self.agent_id}")
+                    # Re-analyze the tool if it's back online
+                    tool = self.available_tools[tool_name]
+                    understanding = await self.analyze_tool_capability(tool)
+                    self.tool_capabilities[tool_name] = understanding.usage_scenarios
+            
+        except Exception as e:
+            logger.error(f"Error handling tool availability change: {e}")
+    
+    async def _handle_tool_performance_update(self, message) -> None:
+        """Handle tool performance update events."""
+        try:
+            tool_name = message.data.get("tool_name")
+            performance_data = message.data.get("performance", {})
+            
+            if tool_name in self.tool_performance_metrics:
+                # Update local performance metrics
+                metrics = self.tool_performance_metrics[tool_name]
+                metrics.success_rate = performance_data.get("success_rate", metrics.success_rate)
+                metrics.avg_duration = performance_data.get("avg_duration", metrics.avg_duration)
+                metrics.error_count = performance_data.get("error_count", metrics.error_count)
+                
+                logger.debug(f"Updated performance metrics for tool {tool_name}")
+            
+        except Exception as e:
+            logger.error(f"Error handling tool performance update: {e}")
+    
+    async def _handle_new_tool_registration(self, message) -> None:
+        """Handle new tool registration events."""
+        try:
+            tool_name = message.data.get("tool_name")
+            
+            if tool_name and tool_name not in self.available_tools:
+                logger.info(f"New tool registered: {tool_name}. Re-running discovery...")
+                
+                # Get the new tool from registry
+                if self.tool_registry:
+                    tool = self.tool_registry.get_tool(tool_name)
+                    if tool:
+                        # Analyze and add the new tool
+                        understanding = await self.analyze_tool_capability(tool)
+                        self.available_tools[tool_name] = tool
+                        self.tool_capabilities[tool_name] = understanding.usage_scenarios
+                        self.tool_performance_metrics[tool_name] = ToolMetrics()
+                        
+                        logger.info(f"Successfully added new tool: {tool_name}")
+            
+        except Exception as e:
+            logger.error(f"Error handling new tool registration: {e}")
+    
+    async def _build_tool_preferences(self) -> None:
+        """Build tool preferences based on agent type and capabilities."""
+        try:
+            if not self.available_tools:
+                logger.warning("No tools available to build preferences")
+                return
+            
+            # Create preference analysis prompt
+            preference_prompt = f"""
+            Analyze these available tools and build preferences for a {self.config.agent_type} agent:
+            
+            == AGENT PROFILE ==
+            Agent Type: {self.config.agent_type}
+            Capabilities: {[cap.value for cap in self.capabilities]}
+            
+            == AVAILABLE TOOLS ==
+            {json.dumps([{
+                "name": name,
+                "scenarios": scenarios
+            } for name, scenarios in self.tool_capabilities.items()], indent=2)}
+            
+            == PREFERENCE ANALYSIS ==
+            
+            Rank these tools for this agent type and provide:
+            
+            1. **Primary Tools**: Tools this agent should use most frequently (top 3-5)
+            2. **Secondary Tools**: Useful but not primary tools (next 3-5)  
+            3. **Specialized Tools**: Tools for specific scenarios only
+            4. **Preference Scores**: Score each tool 0.0-1.0 for this agent type
+            5. **Usage Priorities**: When to prefer one tool over another
+            6. **Workflow Integration**: How tools work together in typical workflows
+            
+            Consider:
+            - Agent's primary responsibilities
+            - Tool categories that align with agent capabilities
+            - Workflow efficiency and tool synergies
+            - Performance characteristics
+            
+            Format as JSON with keys: primary_tools, secondary_tools, specialized_tools, preference_scores, usage_priorities, workflow_patterns
+            """
+            
+            preference_result = await self.execute_llm_task(
+                user_prompt=preference_prompt,
+                context={
+                    "agent_type": self.config.agent_type,
+                    "capabilities": [cap.value for cap in self.capabilities],
+                    "available_tools": list(self.available_tools.keys())
+                },
+                structured_output=True,
+                include_tools=False
+            )
+            
+            # Extract and store preferences
+            primary_tools = preference_result.get("primary_tools", [])
+            preference_scores = preference_result.get("preference_scores", {})
+            
+            # Create or update tool learning model
+            if not self.tool_learning_model:
+                self.tool_learning_model = ToolLearningModel(
+                    agent_type=self.config.agent_type,
+                    tool_preferences=preference_scores
+                )
+            else:
+                self.tool_learning_model.tool_preferences.update(preference_scores)
+            
+            # Store preferences in memory
+            await self.memory_manager.store_memory(
+                content=f"Tool preferences for {self.config.agent_type} agent: Primary tools: {primary_tools}",
+                metadata={
+                    "type": "tool_preferences", 
+                    "agent_type": self.config.agent_type,
+                    "preference_analysis": preference_result,
+                    "primary_tools": primary_tools
+                },
+                importance=0.9,
+                long_term=True
+            )
+            
+            logger.info(f"Built tool preferences for agent {self.agent_id}: {len(primary_tools)} primary tools")
+            
+        except Exception as e:
+            logger.error(f"Failed to build tool preferences: {e}")
