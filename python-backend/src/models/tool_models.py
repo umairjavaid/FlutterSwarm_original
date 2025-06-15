@@ -231,6 +231,11 @@ class ToolMetrics:
     def average_execution_time(self) -> float:
         """Backward compatibility alias for avg_duration."""
         return self.avg_duration
+    
+    @average_execution_time.setter
+    def average_execution_time(self, value: float) -> None:
+        """Backward compatibility setter for avg_duration."""
+        self.avg_duration = value
 
 
 @dataclass
