@@ -353,3 +353,88 @@ class CodeAnalysisResult:
             "analysis_metadata": self.analysis_metadata,
             "analyzed_at": self.analyzed_at.isoformat()
         }
+
+
+@dataclass
+class CodeExample:
+    """Represents a code example found in the project for reference."""
+    file_path: str
+    code_snippet: str
+    code_type: CodeType
+    description: str
+    patterns_used: List[str] = field(default_factory=list)
+    conventions_followed: List[CodeConvention] = field(default_factory=list)
+    similarity_score: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    extracted_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "file_path": self.file_path,
+            "code_snippet": self.code_snippet,
+            "code_type": self.code_type.value,
+            "description": self.description,
+            "patterns_used": self.patterns_used,
+            "conventions_followed": [c.value for c in self.conventions_followed],
+            "similarity_score": self.similarity_score,
+            "metadata": self.metadata,
+            "extracted_at": self.extracted_at.isoformat()
+        }
+
+
+@dataclass
+class IntegrationPlan:
+    """Plan for integrating new code into existing project structure."""
+    plan_id: str
+    feature_description: str
+    affected_files: List[str] = field(default_factory=list)
+    new_files: List[Dict[str, str]] = field(default_factory=list)  # path, purpose
+    dependencies_to_add: List[str] = field(default_factory=list)
+    integration_points: List[Dict[str, Any]] = field(default_factory=list)
+    required_modifications: List[Dict[str, Any]] = field(default_factory=list)
+    testing_requirements: List[str] = field(default_factory=list)
+    configuration_changes: List[Dict[str, Any]] = field(default_factory=list)
+    architectural_impact: Dict[str, Any] = field(default_factory=dict)
+    estimated_complexity: str = "medium"  # low, medium, high
+    risk_assessment: Dict[str, Any] = field(default_factory=dict)
+    implementation_order: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_file_count(self) -> Dict[str, int]:
+        """Get count of affected vs new files."""
+        return {
+            "affected": len(self.affected_files),
+            "new": len(self.new_files),
+            "total": len(self.affected_files) + len(self.new_files)
+        }
+    
+    def has_breaking_changes(self) -> bool:
+        """Check if plan includes breaking changes."""
+        return any(
+            mod.get("breaking", False) 
+            for mod in self.required_modifications
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "plan_id": self.plan_id,
+            "feature_description": self.feature_description,
+            "affected_files": self.affected_files,
+            "new_files": self.new_files,
+            "dependencies_to_add": self.dependencies_to_add,
+            "integration_points": self.integration_points,
+            "required_modifications": self.required_modifications,
+            "testing_requirements": self.testing_requirements,
+            "configuration_changes": self.configuration_changes,
+            "architectural_impact": self.architectural_impact,
+            "estimated_complexity": self.estimated_complexity,
+            "risk_assessment": self.risk_assessment,
+            "implementation_order": self.implementation_order,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat(),
+            "file_count": self.get_file_count(),
+            "has_breaking_changes": self.has_breaking_changes()
+        }

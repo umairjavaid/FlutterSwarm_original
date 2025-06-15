@@ -26,7 +26,7 @@ from ..models.project_models import (
 from ..models.code_models import (
     CodeGeneration, CodeUnderstanding, ProjectContext as CodeProjectContext,
     GenerationEntry, CodePattern, ProjectStructure, CodeType, ArchitectureStyle,
-    CodeConvention, CodeAnalysisResult
+    CodeConvention, CodeAnalysisResult, CodeExample, IntegrationPlan
 )
 from ..models.tool_models import ToolUsagePlan, ToolOperation, TaskOutcome, ToolStatus
 from ..config import get_logger
@@ -957,1064 +957,908 @@ Provide complete, production-ready Flutter UI code with proper documentation.
         }
 
     async def generate_contextual_code(
-        self,
-        feature_request: str,
-        project_context: ProjectContext
-    ) -> Dict[str, Any]:
+        self, 
+        feature_request: str, 
+        project_context: "ProjectContext"
+    ) -> CodeGeneration:
         """
-        Generate code with full project awareness using tools.
+        Generate intelligent, contextual code that seamlessly integrates with existing project structure.
         
-        This method analyzes the existing project, plans the implementation,
-        generates coherent code, and validates the result through tool usage.
+        This is the main entry point for intelligent code generation that:
+        1. Analyzes existing project structure and patterns
+        2. Identifies architectural style and conventions
+        3. Finds similar existing code for reference
+        4. Plans integration with minimal disruption
+        5. Generates code matching project style
+        6. Validates syntax, imports, and compatibility
+        
+        Args:
+            feature_request: Natural language description of what to implement
+            project_context: Complete project context information
+            
+        Returns:
+            CodeGeneration: Generated code with integration plan and metadata
         """
+        generation_id = str(uuid.uuid4())
+        
         try:
-            # 1. Analyze existing project
-            project_analysis = await self._analyze_existing_project(project_context.project_path)
+            logger.info(f"Starting contextual code generation for: {feature_request}")
             
-            # 2. Plan code generation
-            generation_plan = await self._plan_code_generation(
-                feature_request, project_context, project_analysis
+            # Step 1: Analyze existing project structure
+            project_structure = await self._analyze_project_structure(project_context.path)
+            
+            # Step 2: Identify architectural style from existing code
+            architectural_style = await self._identify_architectural_style(project_context)
+            
+            # Step 3: Find similar existing code for reference
+            similar_code = await self._find_similar_code(feature_request, project_context)
+            
+            # Step 4: Plan code integration
+            integration_plan = await self._plan_code_integration(
+                feature_request, project_structure, architectural_style
             )
             
-            # 3. Generate coherent code
-            generated_code = await self._generate_coherent_code(
-                generation_plan, project_analysis
+            # Step 5: Generate contextual code
+            generated_code = await self._generate_code_with_context(
+                feature_request=feature_request,
+                project_context=project_context,
+                architectural_style=architectural_style,
+                similar_code=similar_code,
+                integration_plan=integration_plan
             )
             
-            # 4. Validate generation
-            validation_result = await self._validate_code_generation(
-                generated_code, project_context.project_path
+            # Step 6: Validate generated code
+            validation_result = await self._validate_generated_code(
+                generated_code, project_context, integration_plan
             )
             
-            return {
-                "success": True,
-                "generated_code": generated_code,
-                "validation": validation_result,
-                "project_analysis": project_analysis,
-                "generation_plan": generation_plan
-            }
+            # Create CodeGeneration result
+            code_generation = CodeGeneration(
+                generation_id=generation_id,
+                request_description=feature_request,
+                generated_code=generated_code.get("files", {}),
+                target_files=integration_plan.new_files + integration_plan.affected_files,
+                dependencies=integration_plan.dependencies_to_add,
+                integration_points=[point.__dict__ for point in integration_plan.integration_points],
+                imports_required=generated_code.get("imports", []),
+                configuration_changes=integration_plan.configuration_changes,
+                test_requirements=integration_plan.testing_requirements,
+                documentation=generated_code.get("documentation"),
+                metadata={
+                    "architectural_style": architectural_style.value if architectural_style else None,
+                    "integration_plan_id": integration_plan.plan_id,
+                    "similar_code_count": len(similar_code),
+                    "validation_result": validation_result,
+                    "complexity_estimate": integration_plan.estimated_complexity
+                }
+            )
+            
+            # Add to generation history
+            generation_entry = GenerationEntry(
+                entry_id=generation_id,
+                timestamp=datetime.utcnow(),
+                request=feature_request,
+                generated_code=code_generation,
+                files_affected=integration_plan.affected_files + [
+                    file["path"] for file in integration_plan.new_files
+                ],
+                success=validation_result.get("valid", True),
+                error_message=validation_result.get("error"),
+                agent_id=self.agent_id,
+                project_context=project_context.__dict__ if hasattr(project_context, '__dict__') else None
+            )
+            
+            self.generation_history.append(generation_entry)
+            
+            logger.info(
+                f"Contextual code generation completed: "
+                f"{len(generated_code.get('files', {}))} files, "
+                f"{code_generation.get_total_lines()} lines"
+            )
+            
+            return code_generation
             
         except Exception as e:
             logger.error(f"Contextual code generation failed: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "generated_code": {},
-                "validation": {}
-            }
-
-    async def _analyze_existing_project(self, project_path: str) -> Dict[str, Any]:
-        """Deep analysis of existing project using file system tool."""
-        if not self.file_tool:
-            logger.warning("File system tool not available for project analysis")
-            return {"error": "File system tool not available"}
-        
-        try:
-            # Use tool to scan project structure
-            structure_result = await self.use_tool(
-                "file_system_tool",
-                "analyze_project_structure",
-                {"project_path": project_path},
-                "Analyzing existing Flutter project structure"
-            )
             
-            if structure_result.status.value == "success":
-                project_structure = structure_result.data
-                
-                # Cache the structure
-                self.project_structure_cache[project_path] = project_structure
-                
-                # Understand architectural patterns
-                architecture_analysis = await self._detect_architecture_pattern(
-                    project_structure
-                )
-                
-                # Find existing code patterns
-                code_patterns = await self._extract_existing_patterns(
-                    project_path, project_structure
-                )
-                
-                return {
-                    "structure": project_structure,
-                    "architecture": architecture_analysis,
-                    "patterns": code_patterns,
-                    "analysis_timestamp": datetime.now().isoformat()
+            # Return error result
+            return CodeGeneration(
+                generation_id=generation_id,
+                request_description=feature_request,
+                generated_code={},
+                metadata={
+                    "error": str(e),
+                    "generation_failed": True
                 }
-            else:
-                logger.error(f"Project analysis failed: {structure_result.error_message}")
-                return {"error": structure_result.error_message}
-                
-        except Exception as e:
-            logger.error(f"Project analysis error: {e}")
-            return {"error": str(e)}
+            )
 
-    async def _detect_architecture_pattern(
-        self, project_structure: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Detect the architectural pattern used in the project through LLM reasoning."""
-        
-        structure_prompt = f"""
-        Analyze this Flutter project structure and identify the architectural pattern being used:
-        
-        Project Structure:
-        {json.dumps(project_structure, indent=2)}
-        
-        Look for patterns like:
-        - Clean Architecture (lib/domain, lib/data, lib/presentation)
-        - BLoC pattern (bloc/ directories, _bloc.dart files)
-        - Provider pattern (provider/, _provider.dart files)
-        - MVVM (view/, viewmodel/, model/ directories)
-        - Feature-based organization
-        
-        Provide analysis of:
-        1. Primary architectural pattern
-        2. State management approach
-        3. Directory organization style
-        4. Dependencies and layer separation
-        5. Naming conventions
+    async def _analyze_project_structure(self, project_path: str) -> ProjectStructure:
         """
+        Analyze project structure to understand organization patterns and conventions.
         
-        analysis_result = await self.execute_llm_task(
-            user_prompt=structure_prompt,
-            context={"project_structure": project_structure}
-        )
+        Uses file_system_tool to scan the project and identify:
+        - Directory structure and organization
+        - File naming patterns
+        - Architecture layers
+        - Module dependencies
+        - Configuration files
         
-        return analysis_result
-
-    async def _extract_existing_patterns(
-        self, project_path: str, project_structure: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Extract code patterns from existing files."""
-        if not self.file_tool:
-            return {"error": "File system tool not available"}
-        
-        # Find key Dart files to analyze
-        dart_files = project_structure.get("dart_files", [])
-        key_files = [f for f in dart_files if any(
-            pattern in f for pattern in ["main.dart", "app.dart", "_bloc.dart", "_provider.dart", "_widget.dart"]
-        )][:10]  # Analyze up to 10 key files
-        
-        patterns = {
-            "imports": [],
-            "widget_patterns": [],
-            "state_management": [],
-            "naming_conventions": [],
-            "code_style": {}
-        }
-        
-        for file_path in key_files:
-            try:
-                # Read file content using tool
-                read_result = await self.use_tool(
-                    "file_system_tool",
-                    "read_file",
-                    {"file_path": file_path},
-                    f"Reading {file_path} to extract patterns"
-                )
-                
-                if read_result.status.value == "success":
-                    file_content = read_result.data.get("content", "")
-                    file_patterns = await self._analyze_file_patterns(file_content, file_path)
-                    
-                    # Merge patterns
-                    for key, value in file_patterns.items():
-                        if isinstance(value, list):
-                            patterns[key].extend(value)
-                        elif isinstance(value, dict):
-                            patterns[key].update(value)
-                        
-            except Exception as e:
-                logger.warning(f"Failed to analyze file {file_path}: {e}")
-                continue
-        
-        return patterns
-
-    async def _analyze_file_patterns(self, content: str, file_path: str) -> Dict[str, Any]:
-        """Analyze patterns in a single file using LLM reasoning."""
-        
-        pattern_prompt = f"""
-        Analyze this Dart file and extract code patterns:
-        
-        File: {file_path}
-        Content:
-        ```dart
-        {content[:2000]}  # First 2000 characters
-        ```
-        
-        Extract:
-        1. Import patterns and dependencies
-        2. Widget creation patterns
-        3. State management usage
-        4. Naming conventions (classes, methods, variables)
-        5. Code organization style
-        6. Common utilities or helpers used
-        
-        Return as structured data.
-        """
-        
-        analysis = await self.execute_llm_task(
-            user_prompt=pattern_prompt,
-            context={"file_path": file_path, "content_preview": content[:500]}
-        )
-        
-        return analysis
-
-    async def _plan_code_generation(
-        self,
-        feature_request: str,
-        project_context: ProjectContext,
-        project_analysis: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Plan the code generation strategy using LLM reasoning."""
-        
-        planning_prompt = f"""
-        Plan the implementation of this feature request for a Flutter project:
-        
-        Feature Request: {feature_request}
-        
-        Project Context:
-        - Type: {project_context.project_type.value}
-        - Architecture: {project_analysis.get('architecture', {}).get('primary_pattern', 'unknown')}
-        - Target Platforms: {[p.value for p in project_context.platform_targets]}
-        
-        Existing Project Structure:
-        {json.dumps(project_analysis.get('structure', {}), indent=2)}
-        
-        Create a detailed implementation plan including:
-        1. Files to create/modify
-        2. Dependencies to add (pubspec.yaml changes)
-        3. Integration points with existing code
-        4. Testing strategy
-        5. Step-by-step implementation sequence
-        6. Potential challenges and solutions
-        
-        Consider:
-        - Maintaining consistency with existing patterns
-        - Following project conventions
-        - Ensuring proper separation of concerns
-        - Minimizing breaking changes
-        
-        Format as structured implementation plan.
-        """
-        
-        plan_result = await self.execute_llm_task(
-            user_prompt=planning_prompt,
-            context={
-                "feature_request": feature_request,
-                "project_context": project_context.__dict__,
-                "project_analysis": project_analysis
-            }
-        )
-        
-        return plan_result
-
-    async def _generate_coherent_code(
-        self,
-        generation_plan: Dict[str, Any],
-        project_analysis: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Generate coherent code that matches project patterns."""
-        
-        generated_files = {}
-        
-        for file_info in generation_plan.get("files_to_create", []):
-            file_path = file_info.get("path", "")
-            file_type = file_info.get("type", "")
-            purpose = file_info.get("purpose", "")
+        Args:
+            project_path: Root path of the Flutter project
             
-            # Generate code for this file
-            code_content = await self._generate_file_content(
-                file_path, file_type, purpose, project_analysis
+        Returns:
+            ProjectStructure: Analyzed project structure information
+        """
+        try:
+            logger.info(f"Analyzing project structure: {project_path}")
+            
+            # Use file_system_tool to scan project directory
+            if not self.file_tool:
+                await self.initialize_tools()
+            
+            # Get project directory structure
+            structure_result = await self.use_tool(
+                "file_system",
+                "list_directory",
+                {
+                    "path": project_path,
+                    "recursive": True,
+                    "include_hidden": False,
+                    "filter_patterns": ["*.dart", "*.yaml", "*.json"]
+                },
+                f"Scanning project structure for analysis: {project_path}"
             )
             
-            generated_files[file_path] = {
-                "content": code_content,
-                "type": file_type,
-                "purpose": purpose
-            }
-        
-        return {
-            "files": generated_files,
-            "dependencies": generation_plan.get("dependencies", []),
-            "integration_points": generation_plan.get("integration_points", [])
-        }
-
-    async def _generate_file_content(
-        self,
-        file_path: str,
-        file_type: str,
-        purpose: str,
-        project_analysis: Dict[str, Any]
-    ) -> str:
-        """Generate content for a specific file using LLM reasoning."""
-        
-        # Determine template and patterns based on file type
-        patterns = project_analysis.get("patterns", {})
-        architecture = project_analysis.get("architecture", {})
-        
-        generation_prompt = f"""
-        Generate Flutter/Dart code for this file:
-        
-        File Path: {file_path}
-        File Type: {file_type}
-        Purpose: {purpose}
-        
-        Project Context:
-        - Architecture Pattern: {architecture.get("primary_pattern", "unknown")}
-        - State Management: {architecture.get("state_management", "unknown")}
-        - Existing Patterns: {json.dumps(patterns, indent=2)}
-        
-        Requirements:
-        1. Match existing code style and patterns
-        2. Follow Dart/Flutter best practices
-        3. Include proper imports
-        4. Add meaningful comments
-        5. Ensure type safety
-        6. Follow naming conventions from project
-        
-        Generate complete, production-ready code.
-        """
-        
-        code_result = await self.execute_llm_task(
-            user_prompt=generation_prompt,
-            context={
-                "file_path": file_path,
-                "file_type": file_type,
-                "project_patterns": patterns,
-                "architecture": architecture
-            }
-        )
-        
-        return code_result.get("code", "")
-
-    async def _validate_code_generation(
-        self,
-        generated_code: Dict[str, Any],
-        project_path: str
-    ) -> Dict[str, Any]:
-        """Validate generated code using Flutter analysis tools."""
-        
-        validation_results = {}
-        
-        for file_path, file_info in generated_code.get("files", {}).items():
-            # Create temporary file for validation
-            temp_file_path = f"{project_path}/{file_path}.temp"
+            if structure_result.status != ToolStatus.SUCCESS:
+                raise Exception(f"Failed to scan project structure: {structure_result.error_message}")
             
-            try:
-                # Write file temporarily
-                write_result = await self.use_tool(
-                    "file_system_tool",
-                    "write_file",
-                    {
-                        "path": temp_file_path,
-                        "content": file_info["content"],
-                        "create_backup": False
-                    },
-                    f"Creating temporary file for validation: {file_path}"
-                )
-                
-                if write_result.status.value == "success":
-                    # Validate syntax using Flutter tool
-                    if self.flutter_tool:
-                        analysis_result = await self.use_tool(
-                            "flutter_sdk_tool",
-                            "analyze_code",
-                            {"project_path": project_path, "file_path": temp_file_path},
-                            f"Validating syntax for {file_path}"
+            file_listing = structure_result.data.get("files", [])
+            
+            # Build structure map
+            structure_map = self._build_structure_map(file_listing)
+            
+            # Identify key directories
+            key_directories = self._identify_key_directories(structure_map)
+            
+            # Identify architecture layers
+            architecture_layers = self._identify_architecture_layers(key_directories, file_listing)
+            
+            # Analyze module dependencies
+            module_dependencies = await self._analyze_module_dependencies(file_listing, project_path)
+            
+            # Identify entry points
+            entry_points = self._identify_entry_points(file_listing)
+            
+            # Find configuration files
+            configuration_files = self._find_configuration_files(file_listing)
+            
+            return ProjectStructure(
+                root_path=project_path,
+                structure_map=structure_map,
+                key_directories=key_directories,
+                architecture_layers=architecture_layers,
+                module_dependencies=module_dependencies,
+                entry_points=entry_points,
+                configuration_files=configuration_files,
+                analyzed_at=datetime.utcnow()
+            )
+            
+        except Exception as e:
+            logger.error(f"Project structure analysis failed: {e}")
+            # Return minimal structure
+            return ProjectStructure(
+                root_path=project_path,
+                structure_map={"error": str(e)},
+                analyzed_at=datetime.utcnow()
+            )
+
+    async def _identify_architectural_style(self, project_context: "ProjectContext") -> Optional[ArchitectureStyle]:
+        """
+        Identify the architectural style used in the project by analyzing existing code patterns.
+        
+        Uses LLM reasoning to examine code structure, dependencies, and patterns to determine
+        the primary architectural approach being used.
+        
+        Args:
+            project_context: Project context with dependencies and structure info
+            
+        Returns:
+            ArchitectureStyle: Detected architectural style or None if unclear
+        """
+        try:
+            logger.info("Identifying architectural style from project patterns")
+            
+            # Gather evidence from project structure and dependencies
+            evidence = await self._gather_architectural_evidence(project_context)
+            
+            # Use LLM to analyze architectural patterns
+            analysis_prompt = f"""
+            Analyze this Flutter project to identify its primary architectural pattern:
+            
+            Project Evidence:
+            {json.dumps(evidence, indent=2)}
+            
+            Consider:
+            1. Directory structure and organization
+            2. State management dependencies and patterns
+            3. File naming conventions
+            4. Code organization principles
+            5. Dependency injection patterns
+            
+            Identify the primary architecture pattern from:
+            - Clean Architecture (layers: presentation, domain, data)
+            - BLoC Pattern (business logic components)
+            - Provider Pattern (provider state management)
+            - Riverpod Pattern (riverpod providers)
+            - GetX Pattern (getx controllers)
+            - MVC Pattern (model-view-controller)
+            - MVVM Pattern (model-view-viewmodel)
+            - Custom (unique or mixed approach)
+            
+            Return JSON with:
+            {{
+                "primary_style": "architectural_style_name",
+                "confidence": 0.0-1.0,
+                "evidence": ["supporting evidence"],
+                "secondary_patterns": ["other patterns found"],
+                "recommendations": ["suggestions for improvement"]
+            }}
+            """
+            
+            analysis_result = await self._llm_call(
+                system_prompt="""You are an expert Flutter architect. Analyze project structure 
+                and dependencies to identify architectural patterns with high accuracy.""",
+                user_prompt=analysis_prompt,
+                context={
+                    "analysis_type": "architectural_style_identification",
+                    "project_path": project_context.path
+                },
+                structured_output=True
+            )
+            
+            # Map result to ArchitectureStyle enum
+            style_name = analysis_result.get("primary_style", "").lower()
+            confidence = analysis_result.get("confidence", 0.0)
+            
+            # Only return if confidence is high enough
+            if confidence < 0.6:
+                logger.warning(f"Low confidence in architectural style detection: {confidence}")
+                return None
+            
+            style_mapping = {
+                "clean_architecture": ArchitectureStyle.CLEAN_ARCHITECTURE,
+                "bloc_pattern": ArchitectureStyle.BLOC_PATTERN,
+                "provider_pattern": ArchitectureStyle.PROVIDER_PATTERN,
+                "riverpod_pattern": ArchitectureStyle.RIVERPOD_PATTERN,
+                "getx_pattern": ArchitectureStyle.GETX_PATTERN,
+                "mvc_pattern": ArchitectureStyle.MVC_PATTERN,
+                "mvvm_pattern": ArchitectureStyle.MVVM_PATTERN,
+                "custom": ArchitectureStyle.CUSTOM
+            }
+            
+            detected_style = style_mapping.get(style_name.replace(" ", "_"))
+            
+            if detected_style:
+                logger.info(f"Identified architectural style: {detected_style.value} (confidence: {confidence})")
+                return detected_style
+            
+            return ArchitectureStyle.CUSTOM
+            
+        except Exception as e:
+            logger.error(f"Architectural style identification failed: {e}")
+            return None
+
+    async def _find_similar_code(
+        self, 
+        feature_request: str, 
+        project_context: "ProjectContext"
+    ) -> List[CodeExample]:
+        """
+        Find existing code in the project that's similar to the requested feature.
+        
+        This helps generate code that follows existing patterns and conventions.
+        
+        Args:
+            feature_request: Description of feature to implement
+            project_context: Project context information
+            
+        Returns:
+            List[CodeExample]: Similar code examples from the project
+        """
+        try:
+            logger.info(f"Finding similar code for: {feature_request}")
+            
+            # Use semantic search to find relevant files
+            search_result = await self._semantic_code_search(feature_request, project_context.path)
+            
+            similar_examples = []
+            
+            for file_path in search_result.get("relevant_files", []):
+                try:
+                    # Analyze each relevant file
+                    understanding = await self.understand_existing_code(file_path)
+                    
+                    if understanding and understanding.code_type:
+                        # Extract relevant code snippets
+                        snippet = await self._extract_relevant_snippet(
+                            file_path, feature_request, understanding
                         )
                         
-                        validation_results[file_path] = {
-                            "syntax_valid": analysis_result.status.value == "success",
-                            "issues": analysis_result.data.get("issues", []),
-                            "analysis_result": analysis_result.data
-                        }
-                    
-                    # Clean up temporary file
-                    await self.use_tool(
-                        "file_system_tool",
-                        "delete_file",
-                        {"path": temp_file_path},
-                        f"Cleaning up temporary file: {temp_file_path}"
-                    )
-                else:
-                    validation_results[file_path] = {
-                        "syntax_valid": False,
-                        "error": "Could not create temporary file for validation"
-                    }
+                        if snippet:
+                            example = CodeExample(
+                                file_path=file_path,
+                                code_snippet=snippet,
+                                code_type=understanding.code_type,
+                                description=f"Similar to: {feature_request}",
+                                patterns_used=[p.pattern_type for p in understanding.patterns],
+                                conventions_followed=list(understanding.conventions.keys()),
+                                similarity_score=search_result.get("scores", {}).get(file_path, 0.0)
+                            )
+                            similar_examples.append(example)
+                            
+                except Exception as e:
+                    logger.warning(f"Failed to analyze {file_path}: {e}")
+                    continue
+            
+            # Sort by similarity score
+            similar_examples.sort(key=lambda x: x.similarity_score, reverse=True)
+            
+            # Return top 5 most similar examples
+            return similar_examples[:5]
+            
+        except Exception as e:
+            logger.error(f"Finding similar code failed: {e}")
+            return []
+
+    async def _plan_code_integration(
+        self,
+        feature_request: str,
+        project_structure: ProjectStructure,
+        architectural_style: Optional[ArchitectureStyle]
+    ) -> IntegrationPlan:
+        """
+        Plan how to integrate new code into the existing project structure.
+        
+        Considers architectural constraints, existing patterns, and minimal disruption.
+        
+        Args:
+            feature_request: What needs to be implemented
+            project_structure: Current project organization
+            architectural_style: Detected architectural pattern
+            
+        Returns:
+            IntegrationPlan: Detailed plan for code integration
+        """
+        try:
+            plan_id = str(uuid.uuid4())
+            logger.info(f"Planning code integration for: {feature_request}")
+            
+            # Use LLM to create integration plan
+            planning_prompt = f"""
+            Create a detailed integration plan for implementing this feature in a Flutter project:
+            
+            Feature Request: {feature_request}
+            
+            Project Structure:
+            {json.dumps(project_structure.__dict__ if hasattr(project_structure, '__dict__') else {}, indent=2)}
+            
+            Architectural Style: {architectural_style.value if architectural_style else 'Unknown'}
+            
+            Plan should include:
+            1. Which existing files need modification
+            2. New files to create with their purposes
+            3. Dependencies to add
+            4. Integration points with existing code
+            5. Required configuration changes
+            6. Testing requirements
+            7. Implementation order
+            8. Risk assessment
+            
+            Follow these principles:
+            - Minimize changes to existing stable code
+            - Respect architectural boundaries
+            - Follow established naming conventions
+            - Maintain test coverage
+            - Consider backwards compatibility
+            
+            Return JSON with detailed integration plan.
+            """
+            
+            plan_result = await self._llm_call(
+                system_prompt="""You are an expert Flutter developer creating integration plans. 
+                Focus on clean, maintainable solutions that respect existing project structure.""",
+                user_prompt=planning_prompt,
+                context={
+                    "feature_request": feature_request,
+                    "architectural_style": architectural_style.value if architectural_style else None
+                },
+                structured_output=True
+            )
+            
+            # Create IntegrationPlan from LLM result
+            from ..models.code_models import IntegrationPlan
+            
+            integration_plan = IntegrationPlan(
+                plan_id=plan_id,
+                feature_description=feature_request,
+                affected_files=plan_result.get("affected_files", []),
+                new_files=plan_result.get("new_files", []),
+                dependencies_to_add=plan_result.get("dependencies", []),
+                integration_points=plan_result.get("integration_points", []),
+                required_modifications=plan_result.get("modifications", []),
+                testing_requirements=plan_result.get("testing", []),
+                configuration_changes=plan_result.get("configuration", []),
+                architectural_impact=plan_result.get("architectural_impact", {}),
+                estimated_complexity=plan_result.get("complexity", "medium"),
+                risk_assessment=plan_result.get("risks", {}),
+                implementation_order=plan_result.get("implementation_order", [])
+            )
+            
+            logger.info(
+                f"Integration plan created: {len(integration_plan.new_files)} new files, "
+                f"{len(integration_plan.affected_files)} modifications"
+            )
+            
+            return integration_plan
+            
+        except Exception as e:
+            logger.error(f"Integration planning failed: {e}")
+            
+            # Return minimal plan
+            from ..models.code_models import IntegrationPlan
+            return IntegrationPlan(
+                plan_id=str(uuid.uuid4()),
+                feature_description=feature_request,
+                metadata={"error": str(e)}
+            )
+
+    async def _generate_code_with_context(
+        self,
+        feature_request: str,
+        project_context: "ProjectContext",
+        architectural_style: Optional[ArchitectureStyle],
+        similar_code: List[CodeExample],
+        integration_plan: IntegrationPlan
+    ) -> Dict[str, Any]:
+        """
+        Generate code using full context awareness.
+        
+        This method creates the actual code using all gathered intelligence about
+        the project structure, patterns, and integration requirements.
+        """
+        try:
+            logger.info("Generating contextual code with full project awareness")
+            
+            # Prepare context for code generation
+            generation_context = {
+                "feature_request": feature_request,
+                "architectural_style": architectural_style.value if architectural_style else None,
+                "project_patterns": [example.to_dict() for example in similar_code],
+                "integration_plan": integration_plan.to_dict(),
+                "project_conventions": getattr(project_context, 'conventions', {})
+            }
+            
+            # Create detailed generation prompt
+            generation_prompt = f"""
+            Generate Flutter code for this feature request using full project context:
+            
+            Feature Request: {feature_request}
+            Architectural Style: {architectural_style.value if architectural_style else 'Standard Flutter'}
+            
+            Similar Code Examples:
+            {json.dumps([example.to_dict() for example in similar_code[:3]], indent=2)}
+            
+            Integration Plan:
+            {json.dumps(integration_plan.to_dict(), indent=2)}
+            
+            Requirements:
+            1. Follow the detected architectural style exactly
+            2. Match naming conventions from similar code
+            3. Use the same import organization patterns
+            4. Follow established error handling patterns
+            5. Maintain consistency with existing widget structures
+            6. Include proper documentation following project style
+            7. Add appropriate tests following existing test patterns
+            
+            Generate complete, production-ready Flutter code that seamlessly integrates
+            with the existing project. Include all necessary imports, proper error handling,
+            and follow all detected conventions.
+            
+            Return JSON with:
+            {{
+                "files": {{
+                    "file_path": "complete_file_content",
+                    ...
+                }},
+                "imports": ["required_imports"],
+                "documentation": "implementation_documentation",
+                "integration_notes": ["integration_instructions"]
+            }}
+            """
+            
+            generation_result = await self._llm_call(
+                system_prompt="""You are an expert Flutter developer who generates production-quality 
+                code that perfectly matches existing project patterns and conventions. Always create 
+                complete, working solutions.""",
+                user_prompt=generation_prompt,
+                context=generation_context,
+                structured_output=True
+            )
+            
+            return generation_result
+            
+        except Exception as e:
+            logger.error(f"Contextual code generation failed: {e}")
+            return {"files": {}, "error": str(e)}
+
+    async def _validate_generated_code(
+        self,
+        generated_code: Dict[str, Any],
+        project_context: "ProjectContext", 
+        integration_plan: IntegrationPlan
+    ) -> Dict[str, Any]:
+        """
+        Validate generated code for syntax, imports, and compatibility.
+        """
+        try:
+            validation_results = {
+                "valid": True,
+                "syntax_errors": [],
+                "import_errors": [],
+                "compatibility_issues": [],
+                "warnings": []
+            }
+            
+            files = generated_code.get("files", {})
+            
+            for file_path, content in files.items():
+                # Basic syntax validation
+                syntax_check = self._validate_dart_syntax(content)
+                if not syntax_check["valid"]:
+                    validation_results["syntax_errors"].extend(syntax_check["errors"])
+                    validation_results["valid"] = False
+                
+                # Import validation
+                import_check = self._validate_imports(content, project_context)
+                if not import_check["valid"]:
+                    validation_results["import_errors"].extend(import_check["errors"])
+                    validation_results["valid"] = False
+                
+                # Convention compliance
+                convention_check = self._validate_conventions(content, project_context)
+                validation_results["warnings"].extend(convention_check.get("warnings", []))
+            
+            return validation_results
+            
+        except Exception as e:
+            logger.error(f"Code validation failed: {e}")
+            return {"valid": False, "error": str(e)}
+
+    def _build_structure_map(self, file_listing: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Build a hierarchical map of project structure."""
+        structure_map = {}
+        
+        for file_info in file_listing:
+            path_parts = file_info.get("path", "").split("/")
+            current_level = structure_map
+            
+            for part in path_parts[:-1]:  # Navigate to parent directory
+                if part not in current_level:
+                    current_level[part] = {}
+                current_level = current_level[part]
+            
+            # Add file to final directory
+            filename = path_parts[-1]
+            current_level[filename] = file_info
+        
+        return structure_map
+
+    def _identify_key_directories(self, structure_map: Dict[str, Any]) -> Dict[str, str]:
+        """Identify key project directories like lib, test, assets, etc."""
+        key_directories = {}
+        
+        # Common Flutter directory patterns
+        flutter_patterns = {
+            "lib": "lib",
+            "test": "test", 
+            "assets": "assets",
+            "web": "web",
+            "android": "android",
+            "ios": "ios",
+            "windows": "windows",
+            "macos": "macos",
+            "linux": "linux"
+        }
+        
+        for key, pattern in flutter_patterns.items():
+            if pattern in structure_map:
+                key_directories[key] = pattern
+        
+        return key_directories
+
+    def _identify_architecture_layers(
+        self, 
+        key_directories: Dict[str, str], 
+        file_listing: List[Dict[str, Any]]
+    ) -> Dict[str, List[str]]:
+        """Identify architecture layers from directory structure."""
+        layers = {
+            "presentation": [],
+            "domain": [], 
+            "data": [],
+            "shared": []
+        }
+        
+        # Analyze lib directory structure
+        lib_files = [f for f in file_listing if f.get("path", "").startswith("lib/")]
+        
+        for file_info in lib_files:
+            path = file_info.get("path", "")
+            
+            # Map directories to layers
+            if any(term in path for term in ["ui", "screen", "page", "widget", "presentation"]):
+                layers["presentation"].append(path)
+            elif any(term in path for term in ["usecase", "repository", "domain", "service"]):
+                layers["domain"].append(path)
+            elif any(term in path for term in ["data", "model", "api", "database"]):
+                layers["data"].append(path)
+            else:
+                layers["shared"].append(path)
+        
+        return layers
+
+    async def _analyze_module_dependencies(
+        self, 
+        file_listing: List[Dict[str, Any]], 
+        project_path: str
+    ) -> Dict[str, List[str]]:
+        """Analyze dependencies between modules."""
+        dependencies = {}
+        
+        # This would involve parsing import statements across files
+        # For now, return basic structure
+        dart_files = [f for f in file_listing if f.get("path", "").endswith(".dart")]
+        
+        for file_info in dart_files[:10]:  # Limit analysis for performance
+            file_path = file_info.get("path", "")
+            try:
+                # Read file and analyze imports
+                read_result = await self.use_tool(
+                    "file_system",
+                    "read_file",
+                    {"file_path": f"{project_path}/{file_path}"},
+                    f"Analyzing dependencies in {file_path}"
+                )
+                
+                if read_result.status == ToolStatus.SUCCESS:
+                    content = read_result.data.get("content", "")
+                    imports = self._extract_local_imports(content)
+                    dependencies[file_path] = imports
                     
             except Exception as e:
-                validation_results[file_path] = {
-                    "syntax_valid": False,
-                    "error": str(e)
-                }
+                logger.warning(f"Failed to analyze dependencies for {file_path}: {e}")
+                continue
         
-        return validation_results
+        return dependencies
 
-    async def place_code_intelligently(
-        self,
-        generated_code: Dict[str, Any],
-        project_context: ProjectContext
-    ) -> Dict[str, Any]:
-        """Smart code placement with proper integration."""
+    def _identify_entry_points(self, file_listing: List[Dict[str, Any]]) -> List[str]:
+        """Identify main entry points of the application."""
+        entry_points = []
         
-        placement_results = {}
-        project_path = project_context.project_path
+        for file_info in file_listing:
+            path = file_info.get("path", "")
+            if path.endswith("main.dart") or "main.dart" in path:
+                entry_points.append(path)
         
+        return entry_points
+
+    def _find_configuration_files(self, file_listing: List[Dict[str, Any]]) -> List[str]:
+        """Find configuration files like pubspec.yaml, analysis_options.yaml, etc."""
+        config_files = []
+        config_patterns = [".yaml", ".json", ".xml", ".plist", ".gradle"]
+        
+        for file_info in file_listing:
+            path = file_info.get("path", "")
+            if any(pattern in path for pattern in config_patterns):
+                config_files.append(path)
+        
+        return config_files
+
+    async def _gather_architectural_evidence(self, project_context: "ProjectContext") -> Dict[str, Any]:
+        """Gather evidence about architectural patterns used in the project."""
+        evidence = {
+            "dependencies": getattr(project_context, 'dependencies', []),
+            "directory_structure": {},
+            "file_patterns": [],
+            "state_management_clues": []
+        }
+        
+        # Analyze dependencies for architectural clues
+        deps = getattr(project_context, 'dependencies', [])
+        
+        if any("bloc" in dep for dep in deps):
+            evidence["state_management_clues"].append("bloc_pattern")
+        if any("provider" in dep for dep in deps):
+            evidence["state_management_clues"].append("provider_pattern")
+        if any("riverpod" in dep for dep in deps):
+            evidence["state_management_clues"].append("riverpod_pattern")
+        if any("get" in dep for dep in deps):
+            evidence["state_management_clues"].append("getx_pattern")
+        
+        return evidence
+
+    async def _semantic_code_search(self, feature_request: str, project_path: str) -> Dict[str, Any]:
+        """Search for semantically similar code in the project."""
         try:
-            # 1. Determine optimal file locations
-            file_placements = await self._determine_file_placements(
-                generated_code, project_context
-            )
-            
-            # 2. Handle file creation and updates
-            for file_path, placement_info in file_placements.items():
-                result = await self._place_single_file(
-                    file_path, placement_info, project_path
-                )
-                placement_results[file_path] = result
-            
-            # 3. Update related files (imports, exports, etc.)
-            update_results = await self._update_related_files(
-                file_placements, project_path
-            )
-            
-            # 4. Verify functionality
-            verification_results = await self._verify_code_placement(
-                file_placements, project_path
-            )
-            
-            return {
-                "success": True,
-                "placements": placement_results,
-                "updates": update_results,
-                "verification": verification_results
-            }
-            
-        except Exception as e:
-            logger.error(f"Code placement failed: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "placements": placement_results
-            }
-
-    async def _determine_file_placements(
-        self,
-        generated_code: Dict[str, Any],
-        project_context: ProjectContext
-    ) -> Dict[str, Any]:
-        """Determine optimal file placements using LLM reasoning."""
-        
-        placement_prompt = f"""
-        Determine optimal file placements for this generated code in a Flutter project:
-        
-        Generated Files:
-        {json.dumps(list(generated_code.get("files", {}).keys()), indent=2)}
-        
-        Project Type: {project_context.project_type.value}
-        Project Path: {project_context.project_path}
-        
-        Consider:
-        1. Flutter project conventions (lib/, test/, assets/)
-        2. Feature organization (features/, modules/)
-        3. Layer separation (domain/, data/, presentation/)
-        4. Existing directory structure
-        5. Import path optimization
-        
-        For each file, specify:
-        - Final path location
-        - Directory creation needs
-        - Import updates required
-        - Export file updates
-        
-        Format as structured placement plan.
-        """
-        
-        placement_result = await self.execute_llm_task(
-            user_prompt=placement_prompt,
-            context={
-                "files": list(generated_code.get("files", {}).keys()),
-                "project_context": project_context.__dict__
-            }
-        )
-        
-        return placement_result.get("file_placements", {})
-
-    async def _place_single_file(
-        self,
-        file_path: str,
-        placement_info: Dict[str, Any],
-        project_path: str
-    ) -> Dict[str, Any]:
-        """Place a single file in the project."""
-        
-        try:
-            final_path = placement_info.get("final_path", file_path)
-            content = placement_info.get("content", "")
-            
-            # Use file system tool to place the file
-            write_result = await self.use_tool(
-                "file_system_tool",
-                "write_file",
+            # Use file_system_tool to find Dart files
+            search_result = await self.use_tool(
+                "file_system",
+                "find_files",
                 {
-                    "path": f"{project_path}/{final_path}",
-                    "content": content,
-                    "create_backup": True
+                    "path": project_path,
+                    "pattern": "*.dart",
+                    "recursive": True
                 },
-                f"Placing generated file: {final_path}"
+                f"Finding Dart files for similarity search"
             )
             
+            if search_result.status != ToolStatus.SUCCESS:
+                return {"relevant_files": [], "scores": {}}
+            
+            dart_files = search_result.data.get("files", [])
+            
+            # Simple heuristic-based relevance scoring
+            relevant_files = []
+            scores = {}
+            
+            feature_keywords = feature_request.lower().split()
+            
+            for file_path in dart_files[:20]:  # Limit for performance
+                score = 0
+                filename = Path(file_path).name.lower()
+                
+                # Score based on filename similarity
+                for keyword in feature_keywords:
+                    if keyword in filename:
+                        score += 2
+                    if keyword in file_path.lower():
+                        score += 1
+                
+                if score > 0:
+                    relevant_files.append(file_path)
+                    scores[file_path] = score / len(feature_keywords)
+            
+            # Sort by relevance
+            relevant_files.sort(key=lambda x: scores.get(x, 0), reverse=True)
+            
             return {
-                "success": write_result.status.value == "success",
-                "path": final_path,
-                "backup_path": write_result.data.get("backup_path"),
-                "error": write_result.error_message
+                "relevant_files": relevant_files[:10],
+                "scores": scores
             }
             
         except Exception as e:
-            return {
-                "success": False,
-                "path": file_path,
-                "error": str(e)
-            }
+            logger.error(f"Semantic code search failed: {e}")
+            return {"relevant_files": [], "scores": {}}
 
-    async def _update_related_files(
-        self,
-        file_placements: Dict[str, Any],
-        project_path: str
-    ) -> Dict[str, Any]:
-        """Update related files with imports, exports, etc."""
-        
-        update_results = {}
-        
-        # Update barrel exports
-        barrel_updates = await self._update_barrel_exports(file_placements, project_path)
-        update_results["barrel_exports"] = barrel_updates
-        
-        # Update navigation if needed
-        nav_updates = await self._update_navigation_files(file_placements, project_path)
-        update_results["navigation"] = nav_updates
-        
-        # Update dependency injection if needed
-        di_updates = await self._update_dependency_injection(file_placements, project_path)
-        update_results["dependency_injection"] = di_updates
-        
-        return update_results
-
-    async def validate_code_continuously(
-        self,
-        project_path: str,
-        changed_files: List[str] = None
-    ) -> Dict[str, Any]:
-        """Continuous validation during development."""
-        
+    async def _extract_relevant_snippet(
+        self, 
+        file_path: str, 
+        feature_request: str,
+        understanding: CodeUnderstanding
+    ) -> Optional[str]:
+        """Extract relevant code snippet from a file."""
         try:
-            validation_results = {}
-            
-            # 1. Syntax validation using Flutter analyze
-            if self.flutter_tool:
-                syntax_result = await self.use_tool(
-                    "flutter_sdk_tool",
-                    "analyze_code",
-                    {"project_path": project_path},
-                    "Running Flutter analyzer for syntax validation"
-                )
-                
-                validation_results["syntax"] = {
-                    "valid": syntax_result.status.value == "success",
-                    "issues": syntax_result.data.get("issues", []),
-                    "warnings": syntax_result.data.get("warnings", [])
-                }
-            
-            # 2. Architecture compliance check
-            architecture_result = await self._check_architecture_compliance(
-                project_path, changed_files
-            )
-            validation_results["architecture"] = architecture_result
-            
-            # 3. Performance validation
-            performance_result = await self._check_performance_issues(
-                project_path, changed_files
-            )
-            validation_results["performance"] = performance_result
-            
-            # 4. Style compliance
-            style_result = await self._check_style_compliance(project_path)
-            validation_results["style"] = style_result
-            
-            return {
-                "success": True,
-                "validation_results": validation_results,
-                "overall_valid": all(
-                    result.get("valid", True) for result in validation_results.values()
-                )
-            }
-            
-        except Exception as e:
-            logger.error(f"Continuous validation failed: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "validation_results": {}
-            }
-
-    async def manage_project_dependencies(
-        self,
-        required_features: List[str],
-        project_path: str
-    ) -> Dict[str, Any]:
-        """Intelligent package management using LLM reasoning."""
-        
-        try:
-            # 1. Analyze current dependencies
-            current_deps = await self._analyze_current_dependencies(project_path)
-            
-            # 2. Map features to packages using LLM
-            package_mapping = await self._map_features_to_packages(
-                required_features, current_deps
-            )
-            
-            # 3. Update pubspec.yaml
-            pubspec_result = await self._update_pubspec_yaml(
-                package_mapping, project_path
-            )
-            
-            # 4. Run pub get
-            if self.flutter_tool and pubspec_result.get("success"):
-                pub_result = await self.use_tool(
-                    "flutter_sdk_tool",
-                    "pub_get",
-                    {"project_path": project_path},
-                    "Installing new dependencies"
-                )
-                
-                pubspec_result["pub_get"] = {
-                    "success": pub_result.status.value == "success",
-                    "output": pub_result.data
-                }
-            
-            # 5. Configure packages
-            config_result = await self._configure_new_packages(
-                package_mapping, project_path
-            )
-            
-            return {
-                "success": pubspec_result.get("success", False),
-                "dependencies_added": package_mapping,
-                "pubspec_update": pubspec_result,
-                "configuration": config_result
-            }
-            
-        except Exception as e:
-            logger.error(f"Dependency management failed: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def develop_with_hot_reload(
-        self,
-        project_path: str,
-        development_config: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
-        """Seamless hot reload development experience."""
-        
-        try:
-            config = development_config or {}
-            platform = config.get("platform", "web")
-            port = config.get("port", 3000)
-            
-            # 1. Start development server
-            if self.process_tool:
-                server_result = await self.use_tool(
-                    "process_tool",
-                    "start_dev_server",
-                    {
-                        "project_path": project_path,
-                        "platform": platform,
-                        "port": port,
-                        "hot_reload": True,
-                        "debug_mode": True
-                    },
-                    f"Starting Flutter development server for {platform}"
-                )
-                
-                if server_result.status.value != "success":
-                    return {
-                        "success": False,
-                        "error": f"Failed to start dev server: {server_result.error_message}"
-                    }
-                
-                process_id = server_result.data.get("process_id")
-                
-                # 2. Set up file watching for hot reload
-                watch_result = await self._setup_file_watching(project_path, process_id)
-                
-                # 3. Monitor hot reload performance
-                monitoring_result = await self._setup_hot_reload_monitoring(process_id)
-                
-                return {
-                    "success": True,
-                    "process_id": process_id,
-                    "server_info": server_result.data,
-                    "file_watching": watch_result,
-                    "monitoring": monitoring_result
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": "Process tool not available for development server"
-                }
-                
-        except Exception as e:
-            logger.error(f"Hot reload development setup failed: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-
-    async def _setup_file_watching(
-        self,
-        project_path: str,
-        process_id: str
-    ) -> Dict[str, Any]:
-        """Set up intelligent file watching for hot reload."""
-        
-        try:
-            # Monitor key directories for changes
-            watch_directories = [
-                f"{project_path}/lib",
-                f"{project_path}/assets",
-                f"{project_path}/pubspec.yaml"
-            ]
-            
-            # Start file watching (simplified implementation)
-            # In a full implementation, this would use file system events
-            return {
-                "watching": True,
-                "directories": watch_directories,
-                "process_id": process_id
-            }
-            
-        except Exception as e:
-            return {
-                "watching": False,
-                "error": str(e)
-            }
-
-    async def trigger_hot_reload(
-        self,
-        process_id: str,
-        restart: bool = False
-    ) -> Dict[str, Any]:
-        """Trigger hot reload or restart."""
-        
-        try:
-            if self.process_tool:
-                reload_result = await self.use_tool(
-                    "process_tool",
-                    "hot_reload",
-                    {
-                        "process_id": process_id,
-                        "restart": restart
-                    },
-                    f"Triggering hot {'restart' if restart else 'reload'}"
-                )
-                
-                return {
-                    "success": reload_result.status.value == "success",
-                    "reload_type": "restart" if restart else "reload",
-                    "result": reload_result.data,
-                    "error": reload_result.error_message
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": "Process tool not available"
-                }
-                
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
-
-    async def _analyze_current_dependencies(self, project_path: str) -> Dict[str, Any]:
-        """Analyze current project dependencies."""
-        
-        try:
-            # Read pubspec.yaml
-            pubspec_result = await self.use_tool(
-                "file_system_tool",
+            # Read the file
+            read_result = await self.use_tool(
+                "file_system",
                 "read_file",
-                {"path": f"{project_path}/pubspec.yaml"},
-                "Reading current dependencies from pubspec.yaml"
+                {"file_path": file_path},
+                f"Reading code snippet from {file_path}"
             )
             
-            if pubspec_result.status.value == "success":
-                import yaml
-                pubspec_content = yaml.safe_load(pubspec_result.data["content"])
-                
-                return {
-                    "dependencies": pubspec_content.get("dependencies", {}),
-                    "dev_dependencies": pubspec_content.get("dev_dependencies", {}),
-                    "flutter_version": pubspec_content.get("environment", {}).get("flutter"),
-                    "dart_version": pubspec_content.get("environment", {}).get("sdk")
-                }
-            else:
-                return {"error": "Could not read pubspec.yaml"}
-                
-        except Exception as e:
-            return {"error": str(e)}
-
-    async def _map_features_to_packages(
-        self,
-        required_features: List[str],
-        current_deps: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Map required features to Flutter packages using LLM reasoning."""
-        
-        mapping_prompt = f"""
-        Map these required features to appropriate Flutter packages:
-        
-        Required Features: {required_features}
-        
-        Current Dependencies: {json.dumps(current_deps.get("dependencies", {}), indent=2)}
-        
-        For each feature, recommend:
-        1. Primary package to add
-        2. Package version (use latest stable)
-        3. Additional dependencies if needed
-        4. Configuration requirements
-        5. Whether it conflicts with existing packages
-        
-        Consider:
-        - Package popularity and maintenance
-        - Flutter/Dart compatibility
-        - Performance implications
-        - Team preferences and standards
-        
-        Features to Package mapping:
-        - state_management: bloc, provider, riverpod, getx
-        - navigation: go_router, auto_route
-        - networking: dio, http
-        - local_storage: hive, sqflite, shared_preferences
-        - animations: flutter_animate, rive
-        - ui_components: flutter_screenutil, cached_network_image
-        
-        Format as structured package mapping.
-        """
-        
-        mapping_result = await self.execute_llm_task(
-            user_prompt=mapping_prompt,
-            context={
-                "features": required_features,
-                "current_dependencies": current_deps
-            }
-        )
-        
-        return mapping_result.get("package_mapping", {})
-
-    async def _update_pubspec_yaml(
-        self,
-        package_mapping: Dict[str, Any],
-        project_path: str
-    ) -> Dict[str, Any]:
-        """Update pubspec.yaml with new dependencies."""
-        
-        try:
-            # Read current pubspec
-            pubspec_result = await self.use_tool(
-                "file_system_tool",
-                "read_file",
-                {"path": f"{project_path}/pubspec.yaml"},
-                "Reading pubspec.yaml for dependency update"
-            )
+            if read_result.status != ToolStatus.SUCCESS:
+                return None
             
-            if pubspec_result.status.value != "success":
-                return {"success": False, "error": "Could not read pubspec.yaml"}
+            content = read_result.data.get("content", "")
+            lines = content.split('\n')
             
-            import yaml
-            pubspec_content = yaml.safe_load(pubspec_result.data["content"])
+            # Extract main class or widget (simplified)
+            in_class = False
+            class_lines = []
+            brace_count = 0
             
-            # Add new dependencies
-            dependencies = pubspec_content.setdefault("dependencies", {})
-            dev_dependencies = pubspec_content.setdefault("dev_dependencies", {})
+            for line in lines:
+                if 'class ' in line and ('extends' in line or 'implements' in line):
+                    in_class = True
+                    brace_count = 0
+                    class_lines = [line]
+                elif in_class:
+                    class_lines.append(line)
+                    brace_count += line.count('{') - line.count('}')
+                    if brace_count <= 0 and '}' in line:
+                        break
             
-            for feature, package_info in package_mapping.items():
-                package_name = package_info.get("package")
-                version = package_info.get("version")
-                is_dev = package_info.get("dev_dependency", False)
-                
-                if package_name and version:
-                    target_deps = dev_dependencies if is_dev else dependencies
-                    target_deps[package_name] = version
+            if class_lines and len(class_lines) < 200:  # Reasonable size
+                return '\n'.join(class_lines)
             
-            # Write updated pubspec
-            updated_yaml = yaml.dump(pubspec_content, default_flow_style=False)
-            
-            write_result = await self.use_tool(
-                "file_system_tool",
-                "write_file",
-                {
-                    "path": f"{project_path}/pubspec.yaml",
-                    "content": updated_yaml,
-                    "create_backup": True
-                },
-                "Updating pubspec.yaml with new dependencies"
-            )
-            
-            return {
-                "success": write_result.status.value == "success",
-                "backup_path": write_result.data.get("backup_path"),
-                "added_packages": package_mapping
-            }
+            # Fallback: return first 50 lines
+            return '\n'.join(lines[:50])
             
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            logger.error(f"Failed to extract snippet from {file_path}: {e}")
+            return None
 
-    async def _configure_new_packages(
-        self,
-        package_mapping: Dict[str, Any],
-        project_path: str
-    ) -> Dict[str, Any]:
-        """Configure newly added packages."""
+    def _extract_local_imports(self, content: str) -> List[str]:
+        """Extract local import statements from Dart code."""
+        imports = []
+        lines = content.split('\n')
         
-        config_results = {}
+        for line in lines:
+            line = line.strip()
+            if line.startswith('import ') and not line.startswith('import \'dart:') and not line.startswith('import \'package:'):
+                # Extract local import path
+                import_match = re.search(r"import\s+['\"]([^'\"]+)['\"]", line)
+                if import_match:
+                    imports.append(import_match.group(1))
         
-        for feature, package_info in package_mapping.items():
-            package_name = package_info.get("package")
-            config_needs = package_info.get("configuration", {})
-            
-            if config_needs:
-                # Generate configuration files
-                config_result = await self._generate_package_config(
-                    package_name, config_needs, project_path
-                )
-                config_results[package_name] = config_result
-        
-        return config_results
+        return imports
 
-    async def _generate_package_config(
-        self,
-        package_name: str,
-        config_needs: Dict[str, Any],
-        project_path: str
-    ) -> Dict[str, Any]:
-        """Generate configuration for a specific package."""
+    def _validate_dart_syntax(self, content: str) -> Dict[str, Any]:
+        """Basic Dart syntax validation."""
+        errors = []
         
-        config_prompt = f"""
-        Generate configuration code for Flutter package: {package_name}
+        # Check for basic syntax issues
+        if content.count('{') != content.count('}'):
+            errors.append("Mismatched braces")
+        if content.count('(') != content.count(')'):
+            errors.append("Mismatched parentheses")
+        if content.count('[') != content.count(']'):
+            errors.append("Mismatched brackets")
         
-        Configuration Requirements: {json.dumps(config_needs, indent=2)}
+        # Check for unterminated strings
+        single_quotes = content.count("'") - content.count("\\'")
+        double_quotes = content.count('"') - content.count('\\"')
         
-        Generate:
-        1. Initialization code (main.dart additions)
-        2. Service setup files
-        3. Provider/Bloc setup if needed
-        4. Configuration classes
-        5. Example usage patterns
-        
-        Follow Flutter best practices for package integration.
-        """
-        
-        config_result = await self.execute_llm_task(
-            user_prompt=config_prompt,
-            context={
-                "package_name": package_name,
-                "config_requirements": config_needs
-            }
-        )
-        
-        # Apply configuration if files were generated
-        generated_files = config_result.get("configuration_files", {})
-        
-        for file_path, content in generated_files.items():
-            await self.use_tool(
-                "file_system_tool",
-                "write_file",
-                {
-                    "path": f"{project_path}/{file_path}",
-                    "content": content,
-                    "create_backup": True
-                },
-                f"Creating configuration file for {package_name}: {file_path}"
-            )
+        if single_quotes % 2 != 0:
+            errors.append("Unterminated single quote string")
+        if double_quotes % 2 != 0:
+            errors.append("Unterminated double quote string")
         
         return {
-            "package": package_name,
-            "files_created": list(generated_files.keys()),
-            "configuration": config_result
+            "valid": len(errors) == 0,
+            "errors": errors
         }
 
-    # Helper methods for validation and architecture compliance
-    async def _check_architecture_compliance(
-        self,
-        project_path: str,
-        changed_files: List[str] = None
-    ) -> Dict[str, Any]:
-        """Check if code follows architectural patterns."""
+    def _validate_imports(self, content: str, project_context: "ProjectContext") -> Dict[str, Any]:
+        """Validate import statements."""
+        errors = []
+        lines = content.split('\n')
         
-        compliance_prompt = f"""
-        Check architectural compliance for Flutter project changes:
-        
-        Project Path: {project_path}
-        Changed Files: {changed_files or "All files"}
-        
-        Check for:
-        1. Proper layer separation (UI, Business Logic, Data)
-        2. Dependency direction (outer layers depend on inner)
-        3. Single Responsibility Principle
-        4. Consistent naming conventions
-        5. Proper import organization
-        
-        Provide compliance report with violations and suggestions.
-        """
-        
-        compliance_result = await self.execute_llm_task(
-            user_prompt=compliance_prompt,
-            context={
-                "project_path": project_path,
-                "changed_files": changed_files
-            }
-        )
+        for i, line in enumerate(lines):
+            if line.strip().startswith('import '):
+                # Check for malformed import statements
+                if not (line.strip().endswith(';') or line.strip().endswith("'")):
+                    errors.append(f"Line {i+1}: Import statement not properly terminated")
+                
+                # Basic import path validation
+                if "import ''" in line or 'import ""' in line:
+                    errors.append(f"Line {i+1}: Empty import path")
         
         return {
-            "compliant": compliance_result.get("overall_compliant", True),
-            "violations": compliance_result.get("violations", []),
-            "suggestions": compliance_result.get("suggestions", [])
+            "valid": len(errors) == 0,
+            "errors": errors
         }
 
-    async def _check_performance_issues(
-        self,
-        project_path: str,
-        changed_files: List[str] = None
-    ) -> Dict[str, Any]:
-        """Check for potential performance issues."""
+    def _validate_conventions(self, content: str, project_context: "ProjectContext") -> Dict[str, Any]:
+        """Validate code follows project conventions."""
+        warnings = []
         
-        # This would integrate with performance analysis tools
-        # For now, return a basic structure
-        return {
-            "performance_warnings": [],
-            "suggestions": [],
-            "overall_score": 0.9
-        }
-
-    async def _check_style_compliance(self, project_path: str) -> Dict[str, Any]:
-        """Check code style compliance."""
+        # Check naming conventions (simplified)
+        if not re.search(r'class\s+[A-Z][a-zA-Z0-9]*', content):
+            warnings.append("Class names should be PascalCase")
         
-        if self.flutter_tool:
-            # Use dartfmt to check formatting
-            format_result = await self.use_tool(
-                "flutter_sdk_tool",
-                "format_code",
-                {"project_path": project_path},
-                "Checking code formatting"
-            )
-            
-            return {
-                "properly_formatted": format_result.status.value == "success",
-                "format_issues": format_result.data.get("issues", [])
-            }
+        # Check for documentation
+        if 'class ' in content and '///' not in content:
+            warnings.append("Public classes should have documentation")
         
-        return {"properly_formatted": True}
+        return {"warnings": warnings}
