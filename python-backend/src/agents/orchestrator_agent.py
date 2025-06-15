@@ -19,6 +19,10 @@ from ..core.llm_client import LLMClient
 from ..models.agent_models import AgentMessage, TaskResult, AgentCapabilityInfo
 from ..models.task_models import TaskContext, WorkflowDefinition, TaskType, TaskPriority, ExecutionStrategy
 from ..models.project_models import ProjectContext
+from ..models.tool_models import (
+    WorkflowFeedback, AdaptationResult, PerformanceAnalysis, WorkflowImprovement,
+    WorkflowSession, PerformanceBottleneck, WorkflowStepResult, AgentPerformanceMetrics
+)
 from ..config import get_logger
 
 logger = get_logger("orchestrator_agent")
@@ -51,7 +55,7 @@ class OrchestratorAgent(BaseAgent):
         
         # Agent management
         self.available_agents: Dict[str, AgentCapabilityInfo] = {}
-        self.active_workflows: Dict[str, WorkflowDefinition] = {}
+        self.active_workflows: Dict[str, WorkflowSession] = {}
         self.task_assignments: Dict[str, str] = {}  # task_id -> agent_id
         
         # System tracking
@@ -626,3 +630,604 @@ CORE RESPONSIBILITIES:
 
 You must use logical reasoning to make all decisions and never rely on hardcoded rules.
 """
+
+    # Workflow Adaptation Methods
+
+    async def adapt_workflow(self, workflow_id: str, feedback: 'WorkflowFeedback') -> 'AdaptationResult':
+        """
+        Adapt workflow based on real-time feedback using LLM reasoning.
+        
+        This method analyzes current workflow performance and modifies the workflow
+        to improve efficiency, quality, and resource utilization.
+        """
+        try:
+            logger.info(f"Starting workflow adaptation for workflow {workflow_id}")
+            
+            # Analyze current workflow performance
+            performance_analysis = await self._analyze_workflow_performance(workflow_id, feedback)
+            
+            # Identify improvement opportunities using LLM reasoning
+            improvements = await self._identify_improvement_opportunities(feedback, performance_analysis)
+            
+            # Get current workflow session
+            workflow_session = self.active_workflows.get(workflow_id)
+            if not workflow_session:
+                raise ValueError(f"Workflow {workflow_id} not found in active workflows")
+            
+            # Modify workflow steps based on improvements
+            modified_workflow = await self._modify_workflow_steps(workflow_session, improvements)
+            
+            # Rebalance agent assignments
+            new_assignments = await self._rebalance_agent_assignments(modified_workflow)
+            
+            # Create adaptation result
+            adaptation_result = AdaptationResult(
+                workflow_id=workflow_id,
+                changes_made=[{
+                    "type": improvement.type,
+                    "description": improvement.description,
+                    "target_steps": improvement.target_steps,
+                    "expected_benefit": improvement.expected_benefit
+                } for improvement in improvements],
+                steps_modified=[step for improvement in improvements for step in improvement.target_steps],
+                agents_reassigned=new_assignments,
+                expected_improvements={
+                    "efficiency": sum(imp.expected_benefit for imp in improvements if "efficiency" in imp.type),
+                    "quality": sum(imp.expected_benefit for imp in improvements if "quality" in imp.type),
+                    "time_savings": sum(imp.expected_benefit for imp in improvements if "time" in imp.type)
+                },
+                confidence_score=min(imp.confidence_score for imp in improvements) if improvements else 0.0,
+                estimated_time_savings=sum(imp.expected_benefit for imp in improvements if "time" in imp.type),
+                estimated_quality_improvement=sum(imp.expected_benefit for imp in improvements if "quality" in imp.type),
+                estimated_resource_efficiency=sum(imp.expected_benefit for imp in improvements if "resource" in imp.type)
+            )
+            
+            # Update the active workflow
+            self.active_workflows[workflow_id] = modified_workflow
+            
+            # Store adaptation in memory
+            await self.memory_manager.store_memory(
+                content=f"Workflow adaptation completed for {workflow_id}",
+                metadata={
+                    "workflow_id": workflow_id,
+                    "adaptation_id": adaptation_result.adaptation_id,
+                    "changes_count": len(adaptation_result.changes_made),
+                    "expected_improvements": adaptation_result.expected_improvements
+                },
+                correlation_id=workflow_id,
+                importance=0.9,
+                long_term=True
+            )
+            
+            logger.info(f"Workflow adaptation completed: {len(improvements)} improvements applied")
+            return adaptation_result
+            
+        except Exception as e:
+            logger.error(f"Workflow adaptation failed: {e}")
+            return AdaptationResult(
+                workflow_id=workflow_id,
+                changes_made=[],
+                confidence_score=0.0
+            )
+
+    async def _analyze_workflow_performance(self, workflow_id: str, feedback: 'WorkflowFeedback') -> 'PerformanceAnalysis':
+        """Analyze workflow performance to identify bottlenecks and inefficiencies."""
+        try:
+            # Create LLM prompt for performance analysis
+            prompt = self._create_performance_analysis_prompt(workflow_id, feedback)
+            
+            # Get LLM analysis
+            analysis_response = await self.llm_client.generate(
+                prompt=prompt,
+                max_tokens=2000,
+                temperature=0.3
+            )
+            
+            # Parse LLM response into structured analysis
+            analysis_data = await self._parse_performance_analysis(analysis_response)
+            
+            # Calculate efficiency metrics
+            efficiency_score = self._calculate_efficiency_score(feedback)
+            completion_rate = self._calculate_completion_rate(feedback)
+            resource_utilization = self._calculate_resource_utilization(feedback)
+            
+            # Identify bottlenecks
+            bottlenecks = await self._identify_bottlenecks(feedback, analysis_data)
+            
+            return PerformanceAnalysis(
+                workflow_id=workflow_id,
+                efficiency_score=efficiency_score,
+                completion_rate=completion_rate,
+                resource_utilization=resource_utilization,
+                bottlenecks=bottlenecks,
+                inefficiencies=analysis_data.get("inefficiencies", []),
+                critical_path=analysis_data.get("critical_path", []),
+                parallel_opportunities=analysis_data.get("parallel_opportunities", []),
+                agent_utilization={
+                    agent_id: metrics.resource_efficiency 
+                    for agent_id, metrics in feedback.agent_performance.items()
+                },
+                agent_specialization_mismatches=analysis_data.get("specialization_mismatches", []),
+                output_quality_distribution=self._analyze_quality_distribution(feedback),
+                error_patterns=analysis_data.get("error_patterns", [])
+            )
+            
+        except Exception as e:
+            logger.error(f"Performance analysis failed: {e}")
+            return PerformanceAnalysis(workflow_id=workflow_id)
+
+    async def _identify_improvement_opportunities(
+        self, 
+        feedback: 'WorkflowFeedback', 
+        performance_analysis: 'PerformanceAnalysis'
+    ) -> List['WorkflowImprovement']:
+        """Identify specific improvement opportunities using LLM reasoning."""
+        try:
+            # Create LLM prompt for improvement identification
+            prompt = self._create_improvement_identification_prompt(feedback, performance_analysis)
+            
+            # Get LLM recommendations
+            improvements_response = await self.llm_client.generate(
+                prompt=prompt,
+                max_tokens=3000,
+                temperature=0.4
+            )
+            
+            # Parse improvements from LLM response
+            improvements_data = await self._parse_improvement_recommendations(improvements_response)
+            
+            improvements = []
+            for improvement_data in improvements_data:
+                improvement = WorkflowImprovement(
+                    type=improvement_data.get("type", "optimize"),
+                    priority=improvement_data.get("priority", "medium"),
+                    target_steps=improvement_data.get("target_steps", []),
+                    description=improvement_data.get("description", ""),
+                    proposed_changes=improvement_data.get("proposed_changes", {}),
+                    expected_benefit=improvement_data.get("expected_benefit", 0.0),
+                    implementation_cost=improvement_data.get("implementation_cost", 0.0),
+                    risk_level=improvement_data.get("risk_level", "low"),
+                    confidence_score=improvement_data.get("confidence_score", 0.0),
+                    supporting_evidence=improvement_data.get("supporting_evidence", [])
+                )
+                improvements.append(improvement)
+            
+            # Sort by priority and expected benefit
+            improvements.sort(key=lambda x: (
+                {"critical": 4, "high": 3, "medium": 2, "low": 1}[x.priority],
+                x.expected_benefit
+            ), reverse=True)
+            
+            return improvements
+            
+        except Exception as e:
+            logger.error(f"Improvement identification failed: {e}")
+            return []
+
+    async def _modify_workflow_steps(
+        self, 
+        workflow: 'WorkflowSession', 
+        improvements: List['WorkflowImprovement']
+    ) -> 'WorkflowSession':
+        """Modify workflow steps based on identified improvements."""
+        try:
+            modified_workflow = workflow
+            
+            for improvement in improvements:
+                if improvement.type == "reorder":
+                    modified_workflow = await self._reorder_workflow_steps(modified_workflow, improvement)
+                elif improvement.type == "parallelize":
+                    modified_workflow = await self._parallelize_workflow_steps(modified_workflow, improvement)
+                elif improvement.type == "add_step":
+                    modified_workflow = await self._add_workflow_step(modified_workflow, improvement)
+                elif improvement.type == "remove_step":
+                    modified_workflow = await self._remove_workflow_step(modified_workflow, improvement)
+                elif improvement.type == "resource_reallocation":
+                    modified_workflow = await self._reallocate_resources(modified_workflow, improvement)
+                
+                # Record modification
+                modified_workflow.modifications.append({
+                    "timestamp": datetime.now(),
+                    "type": improvement.type,
+                    "description": improvement.description,
+                    "target_steps": improvement.target_steps,
+                    "changes": improvement.proposed_changes
+                })
+                modified_workflow.adaptation_count += 1
+                modified_workflow.last_adaptation = datetime.now()
+            
+            return modified_workflow
+            
+        except Exception as e:
+            logger.error(f"Workflow modification failed: {e}")
+            return workflow
+
+    async def _rebalance_agent_assignments(self, workflow: 'WorkflowSession') -> Dict[str, str]:
+        """Rebalance agent assignments for optimal performance."""
+        try:
+            # Create LLM prompt for agent assignment optimization
+            prompt = self._create_agent_assignment_prompt(workflow)
+            
+            # Get LLM recommendations
+            assignment_response = await self.llm_client.generate(
+                prompt=prompt,
+                max_tokens=1500,
+                temperature=0.3
+            )
+            
+            # Parse new assignments
+            new_assignments = await self._parse_agent_assignments(assignment_response)
+            
+            # Update workflow with new assignments
+            for step_id, agent_id in new_assignments.items():
+                if step_id in workflow.agent_assignments:
+                    old_agent = workflow.agent_assignments[step_id]
+                    workflow.agent_assignments[step_id] = agent_id
+                    logger.info(f"Reassigned step {step_id} from {old_agent} to {agent_id}")
+            
+            return new_assignments
+            
+        except Exception as e:
+            logger.error(f"Agent rebalancing failed: {e}")
+            return {}
+
+    # Helper methods for workflow modification
+
+    async def _reorder_workflow_steps(
+        self, 
+        workflow: 'WorkflowSession', 
+        improvement: 'WorkflowImprovement'
+    ) -> 'WorkflowSession':
+        """Reorder workflow steps to optimize execution flow."""
+        new_order = improvement.proposed_changes.get("new_order", [])
+        if new_order:
+            # Create new step list with optimized order
+            reordered_steps = []
+            step_dict = {step["step_id"]: step for step in workflow.current_steps}
+            
+            for step_id in new_order:
+                if step_id in step_dict:
+                    reordered_steps.append(step_dict[step_id])
+            
+            # Add any remaining steps
+            for step in workflow.current_steps:
+                if step["step_id"] not in new_order:
+                    reordered_steps.append(step)
+            
+            workflow.current_steps = reordered_steps
+        
+        return workflow
+
+    async def _parallelize_workflow_steps(
+        self, 
+        workflow: 'WorkflowSession', 
+        improvement: 'WorkflowImprovement'
+    ) -> 'WorkflowSession':
+        """Enable parallel execution for compatible steps."""
+        parallel_groups = improvement.proposed_changes.get("parallel_groups", [])
+        
+        for group in parallel_groups:
+            # Update dependencies to enable parallel execution
+            for step_id in group:
+                if step_id in workflow.step_dependencies:
+                    # Remove dependencies within the parallel group
+                    workflow.step_dependencies[step_id] = [
+                        dep for dep in workflow.step_dependencies[step_id] 
+                        if dep not in group
+                    ]
+        
+        return workflow
+
+    async def _add_workflow_step(
+        self, 
+        workflow: 'WorkflowSession', 
+        improvement: 'WorkflowImprovement'
+    ) -> 'WorkflowSession':
+        """Add new step to workflow."""
+        new_step = improvement.proposed_changes.get("new_step")
+        if new_step:
+            workflow.current_steps.append(new_step)
+            
+            # Set up dependencies
+            step_id = new_step["step_id"]
+            dependencies = improvement.proposed_changes.get("dependencies", [])
+            workflow.step_dependencies[step_id] = dependencies
+        
+        return workflow
+
+    async def _remove_workflow_step(
+        self, 
+        workflow: 'WorkflowSession', 
+        improvement: 'WorkflowImprovement'
+    ) -> 'WorkflowSession':
+        """Remove unnecessary step from workflow."""
+        steps_to_remove = improvement.target_steps
+        
+        # Remove steps
+        workflow.current_steps = [
+            step for step in workflow.current_steps 
+            if step["step_id"] not in steps_to_remove
+        ]
+        
+        # Clean up dependencies
+        for step_id in steps_to_remove:
+            if step_id in workflow.step_dependencies:
+                del workflow.step_dependencies[step_id]
+        
+        # Remove references to deleted steps from other dependencies
+        for step_id, deps in workflow.step_dependencies.items():
+            workflow.step_dependencies[step_id] = [
+                dep for dep in deps if dep not in steps_to_remove
+            ]
+        
+        return workflow
+
+    async def _reallocate_resources(
+        self, 
+        workflow: 'WorkflowSession', 
+        improvement: 'WorkflowImprovement'
+    ) -> 'WorkflowSession':
+        """Reallocate resources based on performance data."""
+        resource_changes = improvement.proposed_changes.get("resource_allocation", {})
+        
+        for step_id, resources in resource_changes.items():
+            workflow.resource_allocations[step_id] = resources
+        
+        return workflow
+
+    # Prompt creation methods
+
+    def _create_performance_analysis_prompt(self, workflow_id: str, feedback: 'WorkflowFeedback') -> str:
+        """Create LLM prompt for workflow performance analysis."""
+        return f"""
+Analyze the performance of workflow {workflow_id} based on the following feedback:
+
+WORKFLOW FEEDBACK:
+- Overall completion time: {feedback.overall_completion_time}s (target: {feedback.target_completion_time}s)
+- Quality score: {feedback.quality_score}/1.0
+- Efficiency score: {feedback.efficiency_score}/1.0
+- User satisfaction: {feedback.user_satisfaction}/1.0
+
+STEP RESULTS:
+{json.dumps([{
+    "step_id": step.step_id,
+    "agent_id": step.agent_id,
+    "status": step.status,
+    "execution_time": step.execution_time,
+    "quality_score": step.quality_score,
+    "errors": step.errors
+} for step in feedback.step_results], indent=2)}
+
+AGENT PERFORMANCE:
+{json.dumps({
+    agent_id: {
+        "tasks_completed": metrics.tasks_completed,
+        "tasks_failed": metrics.tasks_failed,
+        "average_execution_time": metrics.average_execution_time,
+        "resource_efficiency": metrics.resource_efficiency,
+        "quality_average": metrics.quality_average,
+        "error_rate": metrics.error_rate
+    } for agent_id, metrics in feedback.agent_performance.items()
+}, indent=2)}
+
+RESOURCE USAGE:
+{json.dumps(feedback.resource_usage, indent=2)}
+
+IDENTIFIED ISSUES:
+- Bottlenecks: {feedback.bottlenecks}
+- Failures: {feedback.failures}
+- System alerts: {feedback.system_alerts}
+
+Please analyze this data and provide insights on:
+1. Performance bottlenecks and their root causes
+2. Inefficiencies in the current workflow
+3. Critical path analysis and parallel execution opportunities
+4. Agent specialization mismatches
+5. Error patterns and quality issues
+6. Resource utilization problems
+
+Respond with a JSON object containing your analysis.
+"""
+
+    def _create_improvement_identification_prompt(
+        self, 
+        feedback: 'WorkflowFeedback', 
+        analysis: 'PerformanceAnalysis'
+    ) -> str:
+        """Create LLM prompt for identifying improvement opportunities."""
+        return f"""
+Based on the workflow performance analysis, identify specific improvement opportunities:
+
+PERFORMANCE ANALYSIS:
+- Efficiency score: {analysis.efficiency_score}/1.0
+- Completion rate: {analysis.completion_rate}%
+- Resource utilization: {analysis.resource_utilization}
+
+IDENTIFIED BOTTLENECKS:
+{json.dumps([{
+    "type": bottleneck.type,
+    "severity": bottleneck.severity,
+    "affected_steps": bottleneck.affected_steps,
+    "root_cause": bottleneck.root_cause,
+    "impact_score": bottleneck.impact_score
+} for bottleneck in analysis.bottlenecks], indent=2)}
+
+INEFFICIENCIES:
+{analysis.inefficiencies}
+
+PARALLEL OPPORTUNITIES:
+{analysis.parallel_opportunities}
+
+AGENT UTILIZATION:
+{analysis.agent_utilization}
+
+Please identify specific improvements with the following types:
+- "reorder": Change step execution order
+- "parallelize": Enable parallel execution
+- "replace_agent": Assign better-suited agents
+- "add_step": Add missing steps for quality/efficiency
+- "remove_step": Remove unnecessary steps
+- "resource_reallocation": Optimize resource distribution
+
+For each improvement, provide:
+1. Type and priority (critical/high/medium/low)
+2. Target steps affected
+3. Description of the change
+4. Proposed changes (specific modifications)
+5. Expected benefit (percentage improvement)
+6. Implementation cost and risk level
+7. Confidence score and supporting evidence
+
+Respond with a JSON array of improvement recommendations.
+"""
+
+    def _create_agent_assignment_prompt(self, workflow: 'WorkflowSession') -> str:
+        """Create LLM prompt for optimizing agent assignments."""
+        return f"""
+Optimize agent assignments for the following workflow:
+
+CURRENT WORKFLOW STEPS:
+{json.dumps([{
+    "step_id": step["step_id"],
+    "description": step.get("description", ""),
+    "current_agent": workflow.agent_assignments.get(step["step_id"], "unassigned"),
+    "estimated_duration": workflow.step_timing_estimates.get(step["step_id"], 0)
+} for step in workflow.current_steps], indent=2)}
+
+AVAILABLE AGENTS:
+{json.dumps([{
+    "agent_id": info.agent_id,
+    "agent_type": info.agent_type,
+    "capabilities": [cap.value for cap in info.capabilities],
+    "current_load": info.current_load,
+    "availability": info.availability
+} for info in self.available_agents.values()], indent=2)}
+
+CURRENT ASSIGNMENTS:
+{json.dumps(workflow.agent_assignments, indent=2)}
+
+AGENT AVAILABILITY:
+{json.dumps(workflow.agent_availability, indent=2)}
+
+Please provide optimized agent assignments considering:
+1. Agent capabilities and specializations
+2. Current workload and availability
+3. Task complexity and requirements
+4. Parallel execution opportunities
+5. Resource constraints
+
+Respond with a JSON object mapping step_ids to optimal agent_ids.
+"""
+
+    # Utility methods
+
+    def _calculate_efficiency_score(self, feedback: 'WorkflowFeedback') -> float:
+        """Calculate overall workflow efficiency score."""
+        if feedback.target_completion_time > 0:
+            time_efficiency = min(1.0, feedback.target_completion_time / max(1.0, feedback.overall_completion_time))
+        else:
+            time_efficiency = 0.5
+        
+        quality_factor = feedback.quality_score
+        error_factor = 1.0 - (len(feedback.failures) / max(1, len(feedback.step_results)))
+        
+        return (time_efficiency + quality_factor + error_factor) / 3.0
+
+    def _calculate_completion_rate(self, feedback: 'WorkflowFeedback') -> float:
+        """Calculate task completion rate."""
+        if not feedback.step_results:
+            return 0.0
+        
+        completed = sum(1 for step in feedback.step_results if step.status == "completed")
+        return (completed / len(feedback.step_results)) * 100.0
+
+    def _calculate_resource_utilization(self, feedback: 'WorkflowFeedback') -> Dict[str, float]:
+        """Calculate resource utilization metrics."""
+        return {
+            "cpu": feedback.resource_usage.get("cpu_utilization", 0.0),
+            "memory": feedback.resource_usage.get("memory_utilization", 0.0),
+            "agents": sum(metrics.current_load for metrics in feedback.agent_performance.values()) / max(1, len(feedback.agent_performance))
+        }
+
+    async def _identify_bottlenecks(
+        self, 
+        feedback: 'WorkflowFeedback', 
+        analysis_data: Dict[str, Any]
+    ) -> List['PerformanceBottleneck']:
+        """Identify performance bottlenecks from feedback data."""
+        bottlenecks = []
+        
+        # Identify slow steps
+        avg_time = sum(step.execution_time for step in feedback.step_results) / max(1, len(feedback.step_results))
+        for step in feedback.step_results:
+            if step.execution_time > avg_time * 2:
+                bottlenecks.append(PerformanceBottleneck(
+                    type="slow_execution",
+                    severity="high" if step.execution_time > avg_time * 3 else "medium",
+                    affected_steps=[step.step_id],
+                    root_cause=f"Step execution time ({step.execution_time}s) significantly exceeds average ({avg_time:.1f}s)",
+                    impact_score=step.execution_time / avg_time,
+                    resolution_strategies=["resource_allocation", "agent_replacement", "step_optimization"]
+                ))
+        
+        # Identify overloaded agents
+        for agent_id, metrics in feedback.agent_performance.items():
+            if metrics.current_load > 0.8:
+                bottlenecks.append(PerformanceBottleneck(
+                    type="agent_overload",
+                    severity="high" if metrics.current_load > 0.9 else "medium",
+                    affected_steps=[],  # Would need to track which steps this agent is handling
+                    root_cause=f"Agent {agent_id} operating at {metrics.current_load*100:.1f}% capacity",
+                    impact_score=metrics.current_load,
+                    resolution_strategies=["load_balancing", "parallel_execution", "agent_addition"]
+                ))
+        
+        return bottlenecks
+
+    def _analyze_quality_distribution(self, feedback: 'WorkflowFeedback') -> Dict[str, int]:
+        """Analyze distribution of quality scores."""
+        distribution = {"high": 0, "medium": 0, "low": 0}
+        
+        for step in feedback.step_results:
+            if step.quality_score >= 0.8:
+                distribution["high"] += 1
+            elif step.quality_score >= 0.6:
+                distribution["medium"] += 1
+            else:
+                distribution["low"] += 1
+        
+        return distribution
+
+    async def _parse_performance_analysis(self, response: str) -> Dict[str, Any]:
+        """Parse LLM response into structured performance analysis data."""
+        try:
+            # Try to parse as JSON
+            return json.loads(response)
+        except json.JSONDecodeError:
+            # Fallback: extract key information from text
+            return {
+                "inefficiencies": [],
+                "critical_path": [],
+                "parallel_opportunities": [],
+                "specialization_mismatches": [],
+                "error_patterns": []
+            }
+
+    async def _parse_improvement_recommendations(self, response: str) -> List[Dict[str, Any]]:
+        """Parse LLM response into structured improvement recommendations."""
+        try:
+            # Try to parse as JSON
+            data = json.loads(response)
+            return data if isinstance(data, list) else [data]
+        except json.JSONDecodeError:
+            # Fallback: return empty list
+            return []
+
+    async def _parse_agent_assignments(self, response: str) -> Dict[str, str]:
+        """Parse LLM response into agent assignment mappings."""
+        try:
+            # Try to parse as JSON
+            return json.loads(response)
+        except json.JSONDecodeError:
+            # Fallback: return empty dict
+            return {}
