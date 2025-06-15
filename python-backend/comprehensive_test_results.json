@@ -1,0 +1,36 @@
+{
+  "summary": {
+    "timestamp": "2025-06-15T14:47:38.022774",
+    "total_duration": 1.9982664585113525,
+    "categories_tested": 2,
+    "categories_passed": 0,
+    "overall_success": false,
+    "success_rate": 0.0,
+    "performance": {},
+    "validation": {},
+    "recommendations": [
+      "Review integration test failures and fix underlying issues",
+      "Review failed test categories and address root causes"
+    ],
+    "test_environment": {
+      "python_version": "3.12.1",
+      "platform": "linux",
+      "test_runner_version": "1.0.0"
+    }
+  },
+  "results": {
+    "integration": {
+      "success": false,
+      "stdout": "",
+      "stderr": "ERROR: usage: __main__.py [options] [file_or_dir] [file_or_dir] [...]\n__main__.py: error: unrecognized arguments: --json-report --json-report-file=integration_results.json\n  inifile: None\n  rootdir: /workspaces/FlutterSwarm/python-backend\n\n",
+      "duration": 1.2205841541290283,
+      "category": "integration"
+    },
+    "basic_functionality": {
+      "success": false,
+      "error": "Basic functionality error: type object 'ProjectType' has no attribute 'MOBILE_APP'",
+      "duration": 0.7772426605224609,
+      "category": "basic_functionality"
+    }
+  }
+}
