@@ -466,12 +466,26 @@ Provide complete IaC templates and deployment documentation.
         task_context: TaskContext,
         llm_analysis: Dict[str, Any]
     ) -> str:
-        """Create prompt for monitoring setup."""
+        # Ensure llm_analysis is a valid JSON string or dict for embedding in the prompt
+        try:
+            if isinstance(llm_analysis, dict):
+                llm_analysis_str = json.dumps(llm_analysis, indent=2)
+            elif isinstance(llm_analysis, str):
+                # Attempt to parse to validate, then re-serialize to ensure format
+                json.loads(llm_analysis) # Validate
+                llm_analysis_str = llm_analysis # Assume it's already well-formed if string
+            else:
+                llm_analysis_str = json.dumps({"error": "Invalid llm_analysis format provided"}, indent=2)
+                logger.warning(f"Invalid llm_analysis type: {type(llm_analysis)}. Using error string.")
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"Error processing llm_analysis for monitoring prompt: {e}")
+            llm_analysis_str = json.dumps({"error": f"Failed to process llm_analysis: {str(e)}"}, indent=2)
+
         return f"""
 Set up comprehensive monitoring and observability for the following Flutter application:
 
 MONITORING REQUIREMENTS:
-{json.dumps(llm_analysis, indent=2)}
+{llm_analysis_str}
 
 APPLICATION CONTEXT:
 {task_context.description}

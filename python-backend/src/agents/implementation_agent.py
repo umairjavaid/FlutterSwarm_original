@@ -8,7 +8,7 @@ and implementation of Flutter applications based on specifications.
 import json
 import uuid
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
 import yaml

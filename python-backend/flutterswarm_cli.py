@@ -10,6 +10,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from typing import Dict, Any
 
@@ -59,13 +60,44 @@ class FlutterSwarmCLI:
         
         print(f"📝 Submitting task: {description[:60]}...")
         
+        # Dynamically determine project name and type
+        # This is a simple heuristic, a more robust solution might be needed
+        project_name = "new_flutter_project" # Default project name
+        project_type = "app" # Default project type
+
+        if "app" in description.lower():
+            project_type = "app"
+        elif "plugin" in description.lower():
+            project_type = "plugin"
+        elif "package" in description.lower():
+            project_type = "package"
+        
+        # Try to extract a project name (e.g., "create ... app named X")
+        name_match = re.search(r"app named (\w+)", description, re.IGNORECASE)
+        if name_match:
+            project_name = name_match.group(1)
+        else:
+            # Fallback: try to generate a name from the description
+            # e.g., "create prod standard flutter music app" -> "flutter_music_app"
+            name_parts = []
+            for word in description.lower().split():
+                if word not in ["create", "a", "an", "the", "app", "flutter", "standard", "prod"]:
+                    name_parts.append(word)
+                if word == "app":
+                    break # stop after "app"
+            if name_parts:
+                project_name = "_".join(name_parts)
+            if not project_name: # if still empty
+                project_name = "generated_project"
+
+
         request = {
             "description": description,
             "task_type": task_type,
             "priority": priority,
             "project_context": {
-                "project_name": "cli_project",
-                "project_type": "app"
+                "project_name": project_name,
+                "project_type": project_type
             }
         }
         

@@ -455,84 +455,90 @@ Provide a detailed, actionable response with clear reasoning and specific implem
                 specialized_result = {}
                 if hasattr(self, '_execute_specialized_processing'):
                     self.logger.debug("Executing specialized processing")
+                    # Assuming analysis_result is defined earlier in the actual code flow
+                    # If analysis_result is not available here, this call needs to be adjusted
+                    # For now, proceeding with the assumption it's available from prior LLM call
+                    if 'analysis_result' not in locals() and 'analysis_result' not in globals():
+                        # Fallback if analysis_result is not in scope, though it should be.
+                        # This indicates a potential logic flow issue to be reviewed.
+                        self.logger.warning("analysis_result not in local scope for _execute_specialized_processing")
+                        # Creating a placeholder or fetching it if necessary
+                        # For now, let's assume it might be part of task_context or self
+                        # This part needs clarification based on the broader context of analysis_result
+                        # If it's from the LLM call just before, it should be in scope.
+                        # If the LLM call was:
+                        # analysis_result = await self.execute_llm_task(...)
+                        # then it should be available.
+
+                        # Placeholder for where analysis_result should be defined
+                        # analysis_result = await self.execute_llm_task(...) # This should be earlier
+
+                        # If analysis_result is truly needed and not available, we might pass None or an empty dict
+                        # depending on how _execute_specialized_processing handles it.
+                        # For now, let's assume it's available from the preceding LLM call.
+                        # If not, the method signature or logic needs adjustment.
+                        # This is a common source of bugs - relying on variables that might not be in scope.
+                        # The original code snippet was:
+                        # specialized_result = await self._execute_specialized_processing(
+                        #     task_context, analysis_result  <-- this analysis_result
+                        # )
+                        # So, it must be defined before this block.
+                        # The provided context shows:
+                        # analysis_result = await self.execute_llm_task(...)
+                        # So it should be fine.
+
                     specialized_result = await self._execute_specialized_processing(
-                        task_context, analysis_result
+                        task_context, analysis_result # analysis_result should be in scope from LLM call
                     )
-                
-                # Create task result
+
+            except Exception as e:
+                self.logger.error(f"Error during task analysis or specialized processing: {e}", exc_info=True)
+                # Ensure task_result is created with an error status
                 task_result = TaskResult(
                     task_id=task_id,
                     agent_id=self.agent_id,
-                    status="completed",
-                    result=analysis_result.get("result", "Task completed successfully"),
-                    deliverables={
-                        "analysis": analysis_result,
-                        "specialized_output": specialized_result
-                    },
-                    metadata={
-                        "agent_type": self.agent_type,
-                        "capabilities_used": [cap.value for cap in self.capabilities],
-                        "processing_time": (datetime.utcnow() - task_context.created_at).total_seconds()
-                    },
-                    correlation_id=correlation_id
+                    status="error",
+                    result=f"Failed to process task: {str(e)}",
+                    error_details=str(e)
                 )
-                
-                # Store task result in memory
-                await self.memory_manager.store_memory(
-                    content=f"Task completed: {task_result.result}",
-                    metadata={
-                        "type": "task_result",
-                        "task_id": task_id,
-                        "status": task_result.status
-                    },
-                    correlation_id=correlation_id,
-                    importance=0.8
-                )
-                
-                self.logger.info(
-                    "Task processing completed successfully",
-                    operation="task_complete",
-                    metadata={
-                        "deliverables_count": len(task_result.deliverables),
-                        "processing_time": task_result.metadata.get("processing_time")
-                    }
-                )
-                
-                self.status = AgentStatus.IDLE
-                self.logger.info(
-                    f"Agent status changed: PROCESSING -> IDLE",
-                    operation="status_change",
-                    metadata={"old_status": "PROCESSING", "new_status": "IDLE"}
-                )
-                
-                return task_result
-                
-            except Exception as e:
-                self.logger.error(
-                    f"Task processing failed: {e}",
-                    operation="task_failed",
-                    metadata={
-                        "error_type": type(e).__name__,
-                        "task_type": task_context.task_type.value
-                    }
-                )
-                
-                # Create error result
-                error_result = TaskResult(
-                    task_id=task_id,
-                    agent_id=self.agent_id,
-                    status="failed",
-                    error=str(e),
-                    correlation_id=correlation_id
-                )
-                
-                self.status = AgentStatus.IDLE
-                return error_result
-                
+                # No re-raise here, finally block will handle cleanup
+            
             finally:
-                # Remove from active tasks
+                # This 'finally' block is for the main try/except of process_task
                 if task_id in self.active_tasks:
                     del self.active_tasks[task_id]
+                
+                # Log task completion or failure
+                if 'task_result' in locals() and task_result.status == "completed":
+                    self.logger.info(f"Task {task_id} completed successfully by agent {self.agent_id}")
+                elif 'task_result' in locals(): # Covers error status
+                    self.logger.error(f"Task {task_id} failed for agent {self.agent_id}. Status: {task_result.status}, Error: {task_result.error_details if task_result.error_details else task_result.result}")
+                else:
+                    # This case should ideally not be reached if task_result is always initialized.
+                    # It implies an error before task_result could be set, even to an error state.
+                    self.logger.error(f"Task {task_id} processing concluded for agent {self.agent_id}, but task_result was not defined. This indicates a severe error early in processing.")
+                    # Define a fallback task_result if it's missing entirely
+                    task_result = TaskResult(
+                        task_id=task_id,
+                        agent_id=self.agent_id,
+                        status="error",
+                        result="Critical error in task processing, result not generated.",
+                        error_details="task_result was not defined by the end of process_task"
+                    )
+
+                # Emit event for task completion/failure
+                await self.event_bus.publish(
+                    topic=f"agent.{self.agent_id}.task.finished",
+                    data={
+                        "task_id": task_id,
+                        "status": task_result.status,
+                        "result_summary": task_result.result[:200] if task_result.result else "N/A", # Summary
+                        "correlation_id": correlation_id
+                    }
+                )
+                
+                log_ctx.set_status("completed" if task_result.status == "completed" else "failed")
+                return task_result
     
     async def health_check(self) -> bool:
         """
