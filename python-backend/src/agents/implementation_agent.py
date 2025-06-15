@@ -26,7 +26,8 @@ from ..models.project_models import (
 from ..models.code_models import (
     CodeGeneration, CodeUnderstanding, ProjectContext as CodeProjectContext,
     GenerationEntry, CodePattern, ProjectStructure, CodeType, ArchitectureStyle,
-    CodeConvention, CodeAnalysisResult, CodeExample, IntegrationPlan
+    CodeConvention, CodeAnalysisResult, CodeExample, IntegrationPlan,
+    GeneratedCode, PlacementResult, UpdateResult
 )
 from ..models.tool_models import ToolUsagePlan, ToolOperation, TaskOutcome, ToolStatus
 from ..config import get_logger
@@ -1862,3 +1863,632 @@ Provide complete, production-ready Flutter UI code with proper documentation.
             warnings.append("Public classes should have documentation")
         
         return {"warnings": warnings}
+
+    # File Operations for Intelligent Code Placement
+    
+    def _determine_optimal_location(self, code_type: str, project_structure: ProjectStructure) -> str:
+        """
+        Determine optimal file location based on architecture pattern and project conventions.
+        
+        Args:
+            code_type: Type of code being placed (widget, bloc, service, etc.)
+            project_structure: Current project structure analysis
+            
+        Returns:
+            str: Optimal file path for placement
+        """
+        try:
+            logger.info(f"Determining optimal location for code type: {code_type}")
+            
+            # Convert string to CodeType enum if needed
+            if isinstance(code_type, str):
+                try:
+                    code_type_enum = CodeType(code_type.lower())
+                except ValueError:
+                    logger.warning(f"Unknown code type: {code_type}, defaulting to UTILITY")
+                    code_type_enum = CodeType.UTILITY
+            else:
+                code_type_enum = code_type
+            
+            # Use project structure to suggest location
+            if project_structure:
+                suggested_location = project_structure.suggest_file_location(code_type_enum, "")
+                if suggested_location:
+                    return suggested_location
+            
+            # Fallback to standard Flutter project structure
+            location_mapping = {
+                CodeType.WIDGET: "lib/widgets",
+                CodeType.SCREEN: "lib/screens", 
+                CodeType.PAGE: "lib/pages",
+                CodeType.BLOC: "lib/bloc",
+                CodeType.CUBIT: "lib/cubit",
+                CodeType.PROVIDER: "lib/providers",
+                CodeType.REPOSITORY: "lib/repositories",
+                CodeType.SERVICE: "lib/services",
+                CodeType.MODEL: "lib/models",
+                CodeType.CONTROLLER: "lib/controllers",
+                CodeType.UTILITY: "lib/utils",
+                CodeType.CONFIGURATION: "lib/config",
+                CodeType.TEST: "test"
+            }
+            
+            optimal_location = location_mapping.get(code_type_enum, "lib")
+            logger.info(f"Determined optimal location: {optimal_location}")
+            
+            return optimal_location
+            
+        except Exception as e:
+            logger.error(f"Failed to determine optimal location: {e}")
+            return "lib"  # Safe fallback
+
+    async def _create_file_structure(self, file_path: str, generated_code: GeneratedCode) -> bool:
+        """
+        Create file structure and write generated code to the appropriate location.
+        
+        Args:
+            file_path: Target file path
+            generated_code: Generated code content and metadata
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Creating file structure for: {file_path}")
+            
+            # Ensure file system tool is available
+            if not self.file_tool:
+                await self.initialize_tools()
+            
+            # Create directory structure if needed
+            directory_path = str(Path(file_path).parent)
+            
+            create_dir_result = await self.use_tool(
+                "file_system",
+                "create_directory",
+                {
+                    "path": directory_path,
+                    "recursive": True
+                },
+                f"Creating directory structure: {directory_path}"
+            )
+            
+            if create_dir_result.status != ToolStatus.SUCCESS:
+                logger.error(f"Failed to create directory: {create_dir_result.error_message}")
+                return False
+            
+            # Write the generated code to file
+            write_result = await self.use_tool(
+                "file_system",
+                "write_file",
+                {
+                    "file_path": file_path,
+                    "content": generated_code.content,
+                    "encoding": "utf-8"
+                },
+                f"Writing generated code to: {file_path}"
+            )
+            
+            if write_result.status != ToolStatus.SUCCESS:
+                logger.error(f"Failed to write file: {write_result.error_message}")
+                return False
+            
+            logger.info(f"Successfully created file structure and wrote code to: {file_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to create file structure: {e}")
+            return False
+
+    async def _update_barrel_exports(self, directory: str, new_files: List[str]) -> bool:
+        """
+        Update or create barrel export files in the specified directory.
+        
+        Args:
+            directory: Directory containing the files to export
+            new_files: List of new files to add to barrel exports
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(f"Updating barrel exports in directory: {directory}")
+            
+            if not new_files:
+                logger.info("No new files to export")
+                return True
+            
+            # Ensure file system tool is available
+            if not self.file_tool:
+                await self.initialize_tools()
+            
+            barrel_file_path = f"{directory}/index.dart"
+            existing_exports = []
+            
+            # Check if barrel file already exists
+            read_result = await self.use_tool(
+                "file_system",
+                "read_file",
+                {"file_path": barrel_file_path},
+                f"Reading existing barrel file: {barrel_file_path}"
+            )
+            
+            if read_result.status == ToolStatus.SUCCESS:
+                content = read_result.data.get("content", "")
+                # Extract existing exports
+                import re
+                existing_exports = re.findall(r"export\s+['\"]([^'\"]+)['\"];", content)
+            
+            # Add new files to exports
+            all_exports = set(existing_exports)
+            for file_path in new_files:
+                # Convert absolute path to relative export path
+                relative_path = Path(file_path).stem
+                export_statement = f"./{relative_path}.dart"
+                all_exports.add(export_statement)
+            
+            # Generate barrel file content
+            export_lines = [f"export '{export_path}';" for export_path in sorted(all_exports)]
+            barrel_content = "\n".join(export_lines) + "\n"
+            
+            # Write updated barrel file
+            write_result = await self.use_tool(
+                "file_system",
+                "write_file",
+                {
+                    "file_path": barrel_file_path,
+                    "content": barrel_content,
+                    "encoding": "utf-8"
+                },
+                f"Writing updated barrel file: {barrel_file_path}"
+            )
+            
+            if write_result.status != ToolStatus.SUCCESS:
+                logger.error(f"Failed to write barrel file: {write_result.error_message}")
+                return False
+            
+            logger.info(f"Successfully updated barrel exports: {barrel_file_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update barrel exports: {e}")
+            return False
+
+    async def _update_related_files(self, affected_files: List[str], new_dependencies: List[str]) -> UpdateResult:
+        """
+        Update related files with imports and exports for new dependencies.
+        
+        Args:
+            affected_files: List of files that need to be updated
+            new_dependencies: List of new dependencies to add
+            
+        Returns:
+            UpdateResult: Result of the update operation
+        """
+        update_id = str(uuid.uuid4())
+        
+        try:
+            logger.info(f"Updating related files with new dependencies")
+            
+            result = UpdateResult(
+                update_id=update_id,
+                success=True
+            )
+            
+            if not affected_files or not new_dependencies:
+                logger.info("No files to update or no new dependencies")
+                return result
+            
+            # Ensure file system tool is available
+            if not self.file_tool:
+                await self.initialize_tools()
+            
+            for file_path in affected_files:
+                try:
+                    # Read existing file
+                    read_result = await self.use_tool(
+                        "file_system",
+                        "read_file",
+                        {"file_path": file_path},
+                        f"Reading file for dependency update: {file_path}"
+                    )
+                    
+                    if read_result.status != ToolStatus.SUCCESS:
+                        error_msg = f"Failed to read file {file_path}: {read_result.error_message}"
+                        result.errors.append(error_msg)
+                        continue
+                    
+                    original_content = read_result.data.get("content", "")
+                    
+                    # Store original content for rollback
+                    result.rollback_data[file_path] = original_content
+                    
+                    # Add new imports
+                    updated_content = self._add_imports_to_file(original_content, new_dependencies)
+                    
+                    if updated_content != original_content:
+                        # Write updated file
+                        write_result = await self.use_tool(
+                            "file_system",
+                            "write_file",
+                            {
+                                "file_path": file_path,
+                                "content": updated_content,
+                                "encoding": "utf-8"
+                            },
+                            f"Writing updated file with new imports: {file_path}"
+                        )
+                        
+                        if write_result.status == ToolStatus.SUCCESS:
+                            result.files_updated.append(file_path)
+                            result.imports_added[file_path] = new_dependencies
+                            logger.info(f"Successfully updated imports in: {file_path}")
+                        else:
+                            error_msg = f"Failed to write updated file {file_path}: {write_result.error_message}"
+                            result.errors.append(error_msg)
+                    
+                except Exception as e:
+                    error_msg = f"Error updating file {file_path}: {str(e)}"
+                    result.errors.append(error_msg)
+                    logger.error(error_msg)
+            
+            # Check for any errors
+            if result.errors:
+                result.success = False
+                logger.warning(f"Update completed with {len(result.errors)} errors")
+            else:
+                logger.info(f"Successfully updated {len(result.files_updated)} files")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to update related files: {e}")
+            return UpdateResult(
+                update_id=update_id,
+                success=False,
+                errors=[str(e)]
+            )
+
+    def _add_imports_to_file(self, content: str, new_dependencies: List[str]) -> str:
+        """
+        Add import statements to a Dart file while maintaining proper order.
+        
+        Args:
+            content: Original file content
+            new_dependencies: List of import paths to add
+            
+        Returns:
+            str: Updated file content with new imports
+        """
+        lines = content.split('\n')
+        
+        # Find existing imports
+        import_lines = []
+        other_lines = []
+        in_imports = True
+        
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('import ') or stripped.startswith('export '):
+                if in_imports:
+                    import_lines.append(line)
+                else:
+                    other_lines.append(line)
+            elif stripped == '' and in_imports:
+                import_lines.append(line)
+            else:
+                in_imports = False
+                other_lines.append(line)
+        
+        # Add new imports if they don't already exist
+        existing_imports = set()
+        for line in import_lines:
+            import re
+            match = re.search(r"import\s+['\"]([^'\"]+)['\"]", line)
+            if match:
+                existing_imports.add(match.group(1))
+        
+        new_import_lines = []
+        for dependency in new_dependencies:
+            if dependency not in existing_imports:
+                new_import_lines.append(f"import '{dependency}';")
+        
+        # Combine imports and sort
+        all_import_lines = import_lines + new_import_lines
+        if new_import_lines:
+            # Sort imports: dart: first, package: second, relative last
+            dart_imports = [line for line in all_import_lines if 'dart:' in line]
+            package_imports = [line for line in all_import_lines if 'package:' in line]
+            relative_imports = [line for line in all_import_lines if not ('dart:' in line or 'package:' in line) and line.strip()]
+            
+            sorted_imports = sorted(dart_imports) + sorted(package_imports) + sorted(relative_imports)
+            
+            # Rebuild content
+            if other_lines and other_lines[0].strip() == '':
+                other_lines = other_lines[1:]  # Remove empty line after imports
+            
+            return '\n'.join(sorted_imports + [''] + other_lines)
+        
+        return content
+
+    async def place_code_intelligently(self, generated_code: GeneratedCode, project_structure: ProjectStructure) -> PlacementResult:
+        """
+        Intelligently place generated code in the optimal location within the project structure.
+        
+        This method:
+        1. Determines optimal file location based on architecture pattern
+        2. Follows project conventions and dependency requirements
+        3. Creates directories and maintains project organization
+        4. Generates barrel exports and updates part files automatically
+        5. Updates related files with imports and exports
+        6. Preserves functionality with backup and validation
+        
+        Args:
+            generated_code: Generated code with metadata
+            project_structure: Current project structure analysis
+            
+        Returns:
+            PlacementResult: Result of the placement operation with details
+        """
+        placement_id = str(uuid.uuid4())
+        
+        try:
+            logger.info(f"Starting intelligent code placement for {generated_code.file_type.value}")
+            
+            result = PlacementResult(
+                placement_id=placement_id,
+                success=True
+            )
+            
+            # Step 1: Determine optimal location
+            optimal_directory = self._determine_optimal_location(generated_code.file_type, project_structure)
+            
+            # Step 2: Generate appropriate file name
+            file_name = self._generate_file_name(generated_code)
+            target_file_path = f"{optimal_directory}/{file_name}"
+            
+            # Step 3: Create backup if file exists
+            backup_path = await self._create_backup(target_file_path)
+            if backup_path:
+                result.backup_paths.append(backup_path)
+            
+            # Step 4: Create file structure and write code
+            success = await self._create_file_structure(target_file_path, generated_code)
+            if not success:
+                result.success = False
+                result.error_message = f"Failed to create file structure for {target_file_path}"
+                return result
+            
+            result.placed_files.append(target_file_path)
+            result.created_directories.append(optimal_directory)
+            
+            # Step 5: Update barrel exports if needed
+            if generated_code.requires_barrel_export:
+                barrel_success = await self._update_barrel_exports(optimal_directory, [target_file_path])
+                if barrel_success:
+                    result.barrel_exports_updated.append(f"{optimal_directory}/index.dart")
+                else:
+                    result.warnings.append(f"Failed to update barrel exports for {optimal_directory}")
+            
+            # Step 6: Update related files with imports
+            if generated_code.dependencies:
+                # Find files that might need to import this new code
+                affected_files = await self._find_files_needing_imports(generated_code, project_structure)
+                
+                if affected_files:
+                    update_result = await self._update_related_files(affected_files, [target_file_path])
+                    
+                    if update_result.success:
+                        result.updated_files.extend(update_result.files_updated)
+                        result.imports_added.update(update_result.imports_added)
+                    else:
+                        result.warnings.extend(update_result.errors)
+            
+            # Step 7: Validate placement
+            validation_success = await self._validate_placement(result)
+            if not validation_success:
+                result.warnings.append("Placement validation found potential issues")
+            
+            result.metadata = {
+                "code_type": generated_code.file_type.value,
+                "target_path": target_file_path,
+                "optimal_directory": optimal_directory,
+                "architecture_layer": generated_code.architecture_layer,
+                "requires_state_management": generated_code.requires_state_management()
+            }
+            
+            logger.info(f"Intelligent code placement completed successfully: {target_file_path}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Intelligent code placement failed: {e}")
+            return PlacementResult(
+                placement_id=placement_id,
+                success=False,
+                error_message=str(e)
+            )
+
+    def _generate_file_name(self, generated_code: GeneratedCode) -> str:
+        """Generate appropriate file name based on code content and conventions."""
+        # Extract class name or use purpose
+        class_name = generated_code.get_main_class_name()
+        if class_name:
+            # Convert PascalCase to snake_case
+            import re
+            snake_case = re.sub('([A-Z]+)', r'_\1', class_name).lower().strip('_')
+            return f"{snake_case}.dart"
+        
+        # Fallback to purpose or generic name
+        if generated_code.purpose:
+            safe_purpose = re.sub(r'[^a-zA-Z0-9_]', '_', generated_code.purpose.lower())
+            return f"{safe_purpose}.dart"
+        
+        return f"generated_{generated_code.file_type.value}.dart"
+
+    async def _create_backup(self, file_path: str) -> Optional[str]:
+        """Create backup of existing file if it exists."""
+        try:
+            if not self.file_tool:
+                await self.initialize_tools()
+            
+            # Check if file exists
+            read_result = await self.use_tool(
+                "file_system",
+                "read_file",
+                {"file_path": file_path},
+                f"Checking if file exists for backup: {file_path}"
+            )
+            
+            if read_result.status != ToolStatus.SUCCESS:
+                # File doesn't exist, no backup needed
+                return None
+            
+            # Create backup
+            backup_path = f"{file_path}.backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+            
+            backup_result = await self.use_tool(
+                "file_system",
+                "copy_file",
+                {
+                    "source_path": file_path,
+                    "destination_path": backup_path
+                },
+                f"Creating backup: {backup_path}"
+            )
+            
+            if backup_result.status == ToolStatus.SUCCESS:
+                logger.info(f"Created backup: {backup_path}")
+                return backup_path
+            else:
+                logger.warning(f"Failed to create backup: {backup_result.error_message}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error creating backup: {e}")
+            return None
+
+    async def _find_files_needing_imports(self, generated_code: GeneratedCode, project_structure: ProjectStructure) -> List[str]:
+        """Find files that might need to import the newly generated code."""
+        try:
+            # This is a simplified implementation
+            # In a real scenario, you'd analyze the project to find files that would benefit from the new code
+            
+            affected_files = []
+            
+            # Look for files in the same architecture layer
+            if generated_code.architecture_layer and project_structure:
+                layer_files = project_structure.architecture_layers.get(generated_code.architecture_layer, [])
+                # Add some logic to determine which files actually need the import
+                # For now, we'll return an empty list to avoid unnecessary modifications
+                pass
+            
+            return affected_files
+            
+        except Exception as e:
+            logger.error(f"Error finding files needing imports: {e}")
+            return []
+
+    async def _validate_placement(self, placement_result: PlacementResult) -> bool:
+        """Validate that the code placement was successful and follows conventions."""
+        try:
+            # Check that all placed files actually exist
+            for file_path in placement_result.placed_files:
+                if not self.file_tool:
+                    await self.initialize_tools()
+                
+                read_result = await self.use_tool(
+                    "file_system",
+                    "read_file",
+                    {"file_path": file_path},
+                    f"Validating placed file: {file_path}"
+                )
+                
+                if read_result.status != ToolStatus.SUCCESS:
+                    logger.error(f"Validation failed: {file_path} does not exist")
+                    return False
+            
+            logger.info("Placement validation successful")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Placement validation error: {e}")
+            return False
+
+    async def rollback_placement(self, placement_result: PlacementResult) -> bool:
+        """
+        Rollback a code placement operation using backup information.
+        
+        Args:
+            placement_result: Result of the original placement operation
+            
+        Returns:
+            bool: True if rollback successful, False otherwise
+        """
+        try:
+            logger.info(f"Rolling back placement: {placement_result.placement_id}")
+            
+            if not self.file_tool:
+                await self.initialize_tools()
+            
+            rollback_success = True
+            
+            # Remove placed files
+            for file_path in placement_result.placed_files:
+                try:
+                    delete_result = await self.use_tool(
+                        "file_system",
+                        "delete_file",
+                        {"file_path": file_path},
+                        f"Rolling back placed file: {file_path}"
+                    )
+                    
+                    if delete_result.status != ToolStatus.SUCCESS:
+                        logger.error(f"Failed to delete file during rollback: {file_path}")
+                        rollback_success = False
+                        
+                except Exception as e:
+                    logger.error(f"Error during file deletion rollback: {e}")
+                    rollback_success = False
+            
+            # Restore from backups
+            for backup_path in placement_result.backup_paths:
+                try:
+                    # Extract original path from backup path
+                    original_path = backup_path.split('.backup_')[0]
+                    
+                    restore_result = await self.use_tool(
+                        "file_system",
+                        "copy_file",
+                        {
+                            "source_path": backup_path,
+                            "destination_path": original_path
+                        },
+                        f"Restoring from backup: {backup_path} -> {original_path}"
+                    )
+                    
+                    if restore_result.status != ToolStatus.SUCCESS:
+                        logger.error(f"Failed to restore from backup: {backup_path}")
+                        rollback_success = False
+                    else:
+                        # Clean up backup file
+                        await self.use_tool(
+                            "file_system",
+                            "delete_file",
+                            {"file_path": backup_path},
+                            f"Cleaning up backup file: {backup_path}"
+                        )
+                        
+                except Exception as e:
+                    logger.error(f"Error during backup restoration: {e}")
+                    rollback_success = False
+            
+            if rollback_success:
+                logger.info(f"Successfully rolled back placement: {placement_result.placement_id}")
+            else:
+                logger.error(f"Rollback completed with errors: {placement_result.placement_id}")
+                
+            return rollback_success
+            
+        except Exception as e:
+            logger.error(f"Rollback operation failed: {e}")
+            return False

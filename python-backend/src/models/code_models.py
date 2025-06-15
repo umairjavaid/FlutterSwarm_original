@@ -438,3 +438,164 @@ class IntegrationPlan:
             "file_count": self.get_file_count(),
             "has_breaking_changes": self.has_breaking_changes()
         }
+
+
+@dataclass
+class GeneratedCode:
+    """Represents generated code with metadata for intelligent placement."""
+    content: str
+    file_type: CodeType
+    dependencies: List[str] = field(default_factory=list)
+    exports: List[str] = field(default_factory=list)
+    imports: List[str] = field(default_factory=list)
+    target_path: Optional[str] = None
+    purpose: str = ""
+    architecture_layer: Optional[str] = None
+    requires_barrel_export: bool = False
+    part_of_library: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def get_main_class_name(self) -> Optional[str]:
+        """Extract main class name from generated code."""
+        import re
+        match = re.search(r'class\s+(\w+)', self.content)
+        return match.group(1) if match else None
+    
+    def get_widget_name(self) -> Optional[str]:
+        """Extract widget name if this is a widget."""
+        if self.file_type in [CodeType.WIDGET, CodeType.SCREEN, CodeType.PAGE]:
+            return self.get_main_class_name()
+        return None
+    
+    def requires_state_management(self) -> bool:
+        """Check if code requires state management integration."""
+        return any(dep in self.content.lower() for dep in ['bloc', 'cubit', 'provider', 'riverpod'])
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "content": self.content,
+            "file_type": self.file_type.value,
+            "dependencies": self.dependencies,
+            "exports": self.exports,
+            "imports": self.imports,
+            "target_path": self.target_path,
+            "purpose": self.purpose,
+            "architecture_layer": self.architecture_layer,
+            "requires_barrel_export": self.requires_barrel_export,
+            "part_of_library": self.part_of_library,
+            "metadata": self.metadata,
+            "main_class_name": self.get_main_class_name(),
+            "widget_name": self.get_widget_name(),
+            "requires_state_management": self.requires_state_management()
+        }
+
+
+@dataclass
+class PlacementResult:
+    """Result of intelligent code placement operation."""
+    placement_id: str
+    placed_files: List[str] = field(default_factory=list)
+    created_directories: List[str] = field(default_factory=list)
+    updated_files: List[str] = field(default_factory=list)
+    backup_paths: List[str] = field(default_factory=list)
+    barrel_exports_updated: List[str] = field(default_factory=list)
+    imports_added: Dict[str, List[str]] = field(default_factory=dict)
+    success: bool = True
+    error_message: Optional[str] = None
+    warnings: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    placement_time: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_total_files_affected(self) -> int:
+        """Get total number of files affected by placement."""
+        return len(set(self.placed_files + self.updated_files))
+    
+    def has_errors(self) -> bool:
+        """Check if placement had errors."""
+        return not self.success or self.error_message is not None
+    
+    def get_rollback_info(self) -> Dict[str, Any]:
+        """Get information needed for rollback."""
+        return {
+            "placement_id": self.placement_id,
+            "backup_paths": self.backup_paths,
+            "created_directories": self.created_directories,
+            "placed_files": self.placed_files,
+            "updated_files": self.updated_files
+        }
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "placement_id": self.placement_id,
+            "placed_files": self.placed_files,
+            "created_directories": self.created_directories,
+            "updated_files": self.updated_files,
+            "backup_paths": self.backup_paths,
+            "barrel_exports_updated": self.barrel_exports_updated,
+            "imports_added": self.imports_added,
+            "success": self.success,
+            "error_message": self.error_message,
+            "warnings": self.warnings,
+            "metadata": self.metadata,
+            "placement_time": self.placement_time.isoformat(),
+            "total_files_affected": self.get_total_files_affected(),
+            "has_errors": self.has_errors(),
+            "rollback_info": self.get_rollback_info()
+        }
+
+
+@dataclass
+class UpdateResult:
+    """Result of updating related files with imports and exports."""
+    update_id: str
+    files_updated: List[str] = field(default_factory=list)
+    imports_added: Dict[str, List[str]] = field(default_factory=dict)
+    exports_modified: Dict[str, List[str]] = field(default_factory=dict)
+    barrel_files_created: List[str] = field(default_factory=list)
+    part_files_updated: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    success: bool = True
+    rollback_data: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def has_errors(self) -> bool:
+        """Check if update had errors."""
+        return not self.success or len(self.errors) > 0
+    
+    def get_total_modifications(self) -> int:
+        """Get total number of modifications made."""
+        return (len(self.files_updated) + 
+                len(self.barrel_files_created) + 
+                len(self.part_files_updated))
+    
+    def get_affected_files(self) -> List[str]:
+        """Get all files affected by the update."""
+        return list(set(
+            self.files_updated + 
+            self.barrel_files_created + 
+            self.part_files_updated
+        ))
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "update_id": self.update_id,
+            "files_updated": self.files_updated,
+            "imports_added": self.imports_added,
+            "exports_modified": self.exports_modified,
+            "barrel_files_created": self.barrel_files_created,
+            "part_files_updated": self.part_files_updated,
+            "errors": self.errors,
+            "warnings": self.warnings,
+            "success": self.success,
+            "rollback_data": self.rollback_data,
+            "metadata": self.metadata,
+            "updated_at": self.updated_at.isoformat(),
+            "has_errors": self.has_errors(),
+            "total_modifications": self.get_total_modifications(),
+            "affected_files": self.get_affected_files()
+        }

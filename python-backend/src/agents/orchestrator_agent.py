@@ -2718,7 +2718,7 @@ Respond with a JSON structure containing the complete recovery plan.
                 estimated_time=600.0,
                 success_probability=0.5
             )
-=======
+
     # Enhanced Workflow Planning Methods
     
     async def _initialize_workflow_templates(self) -> None:
