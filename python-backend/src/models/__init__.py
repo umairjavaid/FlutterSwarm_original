@@ -25,6 +25,18 @@ from .project_models import (
     ArchitecturePattern,
     PlatformTarget
 )
+from .code_models import (
+    CodeGeneration,
+    CodeUnderstanding,
+    ProjectContext as CodeProjectContext,
+    GenerationEntry,
+    CodePattern,
+    ProjectStructure,
+    CodeType,
+    ArchitectureStyle,
+    CodeConvention,
+    CodeAnalysisResult
+)
 
 __all__ = [
     # Agent models
@@ -49,5 +61,17 @@ __all__ = [
     "CodeMetrics",
     "ProjectType",
     "ArchitecturePattern",
-    "PlatformTarget"
+    "PlatformTarget",
+    
+    # Code models
+    "CodeGeneration",
+    "CodeUnderstanding", 
+    "CodeProjectContext",
+    "GenerationEntry",
+    "CodePattern",
+    "ProjectStructure",
+    "CodeType",
+    "ArchitectureStyle",
+    "CodeConvention",
+    "CodeAnalysisResult"
 ]

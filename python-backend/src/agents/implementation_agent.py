@@ -7,6 +7,7 @@ and implementation of Flutter applications based on specifications.
 
 import json
 import uuid
+import re
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +23,12 @@ from ..models.project_models import (
     ProjectContext, ArchitecturePattern, PlatformTarget, 
     ProjectType, CodeMetrics
 )
-from ..models.tool_models import ToolUsagePlan, ToolOperation, TaskOutcome
+from ..models.code_models import (
+    CodeGeneration, CodeUnderstanding, ProjectContext as CodeProjectContext,
+    GenerationEntry, CodePattern, ProjectStructure, CodeType, ArchitectureStyle,
+    CodeConvention, CodeAnalysisResult
+)
+from ..models.tool_models import ToolUsagePlan, ToolOperation, TaskOutcome, ToolStatus
 from ..config import get_logger
 
 logger = get_logger("implementation_agent")
@@ -98,7 +104,13 @@ class ImplementationAgent(BaseAgent):
         self.file_tool = None
         self.process_tool = None
         
-        # Project awareness
+        # NEW: Project-aware code generation attributes
+        self.project_context: Optional[CodeProjectContext] = None
+        self.code_patterns: Dict[str, CodePattern] = {}
+        self.project_structure: Optional[ProjectStructure] = None
+        self.generation_history: List[GenerationEntry] = []
+        
+        # Project awareness (legacy - keeping for compatibility)
         self.current_project_context = None
         self.project_structure_cache = {}
         self.code_understanding_cache = {}
@@ -156,6 +168,465 @@ Always generate complete, working code solutions with proper imports, error hand
         # Understand tool capabilities
         if self.flutter_tool:
             await self.analyze_tool_capability(self.flutter_tool)
+
+    async def understand_existing_code(self, file_path: str) -> CodeUnderstanding:
+        """
+        Analyze existing Flutter code to understand patterns, conventions, and structure.
+        
+        This method uses LLM reasoning to understand code patterns and architectural
+        decisions in existing Flutter projects, enabling intelligent code generation
+        that follows project conventions.
+        
+        Args:
+            file_path: Path to the Flutter file to analyze
+            
+        Returns:
+            CodeUnderstanding: Comprehensive analysis of the code file
+        """
+        try:
+            # Validate file path and ensure it exists
+            if not file_path or not Path(file_path).exists():
+                raise ValueError(f"File path does not exist: {file_path}")
+            
+            # Check cache first
+            if file_path in self.code_understanding_cache:
+                cached_understanding = self.code_understanding_cache[file_path]
+                # Return cached if recent (within last hour)
+                if (datetime.utcnow() - cached_understanding.analyzed_at).seconds < 3600:
+                    return cached_understanding
+            
+            logger.info(f"Analyzing existing code: {file_path}")
+            
+            # Use file system tool to read the code
+            if not self.file_tool:
+                await self.initialize_tools()
+            
+            read_result = await self.use_tool(
+                "file_system",
+                "read_file",
+                {"file_path": file_path},
+                f"Reading Flutter code file for analysis: {file_path}"
+            )
+            
+            if read_result.status != ToolStatus.SUCCESS:
+                raise Exception(f"Failed to read file: {read_result.error_message}")
+            
+            file_content = read_result.data.get("content", "")
+            file_info = read_result.data
+            
+            # Determine code type from file structure and content
+            code_type = self._detect_code_type(file_path, file_content)
+            
+            # Use LLM to analyze code patterns and structure
+            analysis_prompt = self._create_code_analysis_prompt(
+                file_path, file_content, code_type
+            )
+            
+            llm_analysis = await self._llm_call(
+                system_prompt=await self._get_code_analysis_system_prompt(),
+                user_prompt=analysis_prompt,
+                context={
+                    "file_path": file_path,
+                    "code_type": code_type.value if code_type else "unknown",
+                    "file_size": len(file_content)
+                },
+                structured_output=True
+            )
+            
+            # Parse LLM analysis and extract structured information
+            structure = self._extract_code_structure(file_content, llm_analysis)
+            patterns = self._extract_code_patterns(file_content, llm_analysis)
+            conventions = self._extract_conventions(file_content, llm_analysis)
+            dependencies = self._extract_dependencies(file_content, file_info)
+            relationships = self._extract_relationships(file_content, llm_analysis)
+            
+            # Calculate complexity metrics
+            complexity_metrics = self._calculate_complexity_metrics(file_content)
+            
+            # Generate quality indicators
+            quality_indicators = self._assess_code_quality(
+                file_content, llm_analysis, complexity_metrics
+            )
+            
+            # Generate improvement suggestions
+            suggestions = self._generate_code_suggestions(
+                file_content, llm_analysis, quality_indicators
+            )
+            
+            # Create CodeUnderstanding object
+            understanding = CodeUnderstanding(
+                file_path=file_path,
+                code_type=code_type,
+                structure=structure,
+                patterns=patterns,
+                conventions=conventions,
+                dependencies=dependencies,
+                relationships=relationships,
+                complexity_metrics=complexity_metrics,
+                quality_indicators=quality_indicators,
+                suggestions=suggestions,
+                analyzed_at=datetime.utcnow()
+            )
+            
+            # Cache the result
+            self.code_understanding_cache[file_path] = understanding
+            
+            # Update project-level pattern knowledge
+            await self._update_project_patterns(patterns)
+            
+            logger.info(
+                f"Code analysis completed for {file_path}: "
+                f"found {len(patterns)} patterns, {len(dependencies)} dependencies"
+            )
+            
+            return understanding
+            
+        except Exception as e:
+            logger.error(f"Failed to understand code in {file_path}: {e}")
+            # Return minimal understanding with error info
+            return CodeUnderstanding(
+                file_path=file_path,
+                structure={"error": str(e)},
+                patterns=[],
+                conventions={},
+                dependencies=[],
+                relationships={},
+                complexity_metrics={},
+                quality_indicators={"analysis_error": str(e)},
+                suggestions=[f"Could not analyze code: {str(e)}"],
+                analyzed_at=datetime.utcnow()
+            )
+    
+    def _detect_code_type(self, file_path: str, content: str) -> Optional[CodeType]:
+        """Detect the type of Flutter code from file path and content."""
+        path = Path(file_path)
+        
+        # Analyze file path patterns
+        if "test" in str(path):
+            return CodeType.TEST
+        
+        if path.suffix != ".dart":
+            return None
+            
+        # Analyze content patterns
+        if re.search(r'class\s+\w+\s+extends\s+StatelessWidget', content):
+            return CodeType.WIDGET
+        elif re.search(r'class\s+\w+\s+extends\s+StatefulWidget', content):
+            return CodeType.WIDGET
+        elif re.search(r'class\s+\w+\s+extends\s+(Bloc|Cubit)', content):
+            return CodeType.BLOC if "Bloc" in content else CodeType.CUBIT
+        elif re.search(r'class\s+\w+\s+with\s+ChangeNotifier', content):
+            return CodeType.PROVIDER
+        elif re.search(r'class\s+\w+Repository', content):
+            return CodeType.REPOSITORY
+        elif re.search(r'class\s+\w+Service', content):
+            return CodeType.SERVICE
+        elif re.search(r'class\s+\w+Controller', content):
+            return CodeType.CONTROLLER
+        elif "main(" in content and "runApp(" in content:
+            return CodeType.CONFIGURATION
+        elif re.search(r'class\s+\w+\s*{', content):
+            return CodeType.MODEL
+        
+        return CodeType.UTILITY
+    
+    def _create_code_analysis_prompt(
+        self, file_path: str, content: str, code_type: Optional[CodeType]
+    ) -> str:
+        """Create a prompt for LLM analysis of Flutter code."""
+        return f"""
+Analyze this Flutter/Dart code file and provide detailed insights:
+
+FILE: {file_path}
+TYPE: {code_type.value if code_type else 'unknown'}
+
+CODE:
+```dart
+{content[:4000]}  # Truncate for token limits
+```
+
+Please provide a comprehensive analysis including:
+
+1. STRUCTURE ANALYSIS:
+   - Main classes, functions, and their purposes
+   - Widget hierarchy (if applicable)  
+   - State management approach
+   - Architecture pattern used
+
+2. CODE PATTERNS:
+   - Naming conventions used
+   - File organization patterns
+   - Import/export patterns
+   - Error handling patterns
+   - State management patterns
+
+3. CONVENTIONS:
+   - Coding style and formatting
+   - Documentation practices
+   - Comment patterns
+   - Variable naming conventions
+
+4. DEPENDENCIES & RELATIONSHIPS:
+   - External package dependencies
+   - Internal file dependencies
+   - Widget composition relationships
+   - Data flow patterns
+
+5. QUALITY ASSESSMENT:
+   - Code complexity
+   - Maintainability indicators
+   - Performance considerations
+   - Security considerations
+
+6. SUGGESTIONS:
+   - Potential improvements
+   - Refactoring opportunities
+   - Performance optimizations
+   - Best practice recommendations
+
+Respond with structured, detailed analysis focused on understanding the developer's intent and patterns.
+"""
+    
+    async def _get_code_analysis_system_prompt(self) -> str:
+        """Get system prompt for code analysis."""
+        return """
+You are an expert Flutter/Dart code analyst with deep understanding of:
+
+- Flutter framework architecture and best practices
+- Dart language features and conventions
+- Common Flutter design patterns (BLoC, Provider, Riverpod, etc.)
+- Mobile app development patterns
+- Code quality and maintainability principles
+
+Your role is to analyze Flutter code with the expertise of a senior Flutter developer,
+identifying patterns, conventions, and architectural decisions that should be followed
+in future code generation.
+
+Focus on understanding the developer's intent, established patterns, and project conventions
+so that new code can be generated that seamlessly integrates with the existing codebase.
+
+Provide detailed, accurate analysis that captures both explicit and implicit patterns.
+"""
+
+    def _extract_code_structure(
+        self, content: str, llm_analysis: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract structural information from code analysis."""
+        structure = {}
+        
+        # Parse classes
+        class_matches = re.findall(r'class\s+(\w+)(?:\s+extends\s+(\w+))?', content)
+        if class_matches:
+            structure["classes"] = [
+                {"name": match[0], "extends": match[1] if match[1] else None}
+                for match in class_matches
+            ]
+        
+        # Parse functions
+        function_matches = re.findall(r'(?:Future<\w+>|void|\w+)\s+(\w+)\s*\(', content)
+        if function_matches:
+            structure["functions"] = function_matches
+        
+        # Parse imports
+        import_matches = re.findall(r"import\s+['\"]([^'\"]+)['\"]", content)
+        if import_matches:
+            structure["imports"] = import_matches
+        
+        # Add LLM analysis if available
+        if llm_analysis and "structure" in llm_analysis:
+            structure.update(llm_analysis["structure"])
+            
+        return structure
+    
+    def _extract_code_patterns(
+        self, content: str, llm_analysis: Dict[str, Any]
+    ) -> List[CodePattern]:
+        """Extract code patterns from analysis."""
+        patterns = []
+        
+        # Widget patterns
+        if "StatelessWidget" in content:
+            patterns.append(CodePattern(
+                pattern_id=f"stateless_widget_{uuid.uuid4().hex[:8]}",
+                pattern_type="widget_pattern",
+                description="Uses StatelessWidget for UI components",
+                examples=[],
+                frequency=content.count("StatelessWidget"),
+                confidence=0.9
+            ))
+        
+        if "StatefulWidget" in content:
+            patterns.append(CodePattern(
+                pattern_id=f"stateful_widget_{uuid.uuid4().hex[:8]}",
+                pattern_type="widget_pattern", 
+                description="Uses StatefulWidget for stateful UI components",
+                examples=[],
+                frequency=content.count("StatefulWidget"),
+                confidence=0.9
+            ))
+        
+        # Add patterns from LLM analysis
+        if llm_analysis and "patterns" in llm_analysis:
+            for pattern_data in llm_analysis["patterns"]:
+                if isinstance(pattern_data, dict):
+                    patterns.append(CodePattern(
+                        pattern_id=f"llm_pattern_{uuid.uuid4().hex[:8]}",
+                        pattern_type=pattern_data.get("type", "unknown"),
+                        description=pattern_data.get("description", ""),
+                        examples=pattern_data.get("examples", []),
+                        frequency=pattern_data.get("frequency", 1),
+                        confidence=pattern_data.get("confidence", 0.7)
+                    ))
+        
+        return patterns
+    
+    def _extract_conventions(
+        self, content: str, llm_analysis: Dict[str, Any]
+    ) -> Dict[CodeConvention, str]:
+        """Extract coding conventions from analysis."""
+        conventions = {}
+        
+        # Naming convention analysis
+        if re.search(r'[a-z]+[A-Z]', content):  # camelCase
+            conventions[CodeConvention.NAMING_CONVENTION] = "camelCase"
+        elif re.search(r'[a-z]+_[a-z]+', content):  # snake_case
+            conventions[CodeConvention.NAMING_CONVENTION] = "snake_case"
+        
+        # Import style
+        if "package:" in content:
+            conventions[CodeConvention.IMPORT_STYLE] = "package_imports"
+        
+        # Add LLM-detected conventions
+        if llm_analysis and "conventions" in llm_analysis:
+            for conv_key, conv_value in llm_analysis["conventions"].items():
+                try:
+                    convention_enum = CodeConvention(conv_key)
+                    conventions[convention_enum] = conv_value
+                except ValueError:
+                    # Skip unknown conventions
+                    pass
+        
+        return conventions
+    
+    def _extract_dependencies(
+        self, content: str, file_info: Dict[str, Any]
+    ) -> List[str]:
+        """Extract dependencies from imports and analysis."""
+        dependencies = []
+        
+        # Extract from imports
+        import_matches = re.findall(r"import\s+['\"]([^'\"]+)['\"]", content)
+        for import_path in import_matches:
+            if import_path.startswith("package:"):
+                package_name = import_path.split("/")[0].replace("package:", "")
+                if package_name not in dependencies:
+                    dependencies.append(package_name)
+            elif import_path.startswith("dart:"):
+                dart_lib = import_path.replace("dart:", "")
+                if dart_lib not in dependencies:
+                    dependencies.append(f"dart:{dart_lib}")
+        
+        return dependencies
+    
+    def _extract_relationships(
+        self, content: str, llm_analysis: Dict[str, Any]
+    ) -> Dict[str, List[str]]:
+        """Extract code relationships from analysis."""
+        relationships = {}
+        
+        # Widget composition relationships
+        widget_matches = re.findall(r'(\w+)\(\s*child:', content)
+        if widget_matches:
+            relationships["widget_composition"] = widget_matches
+        
+        # Class inheritance relationships  
+        extends_matches = re.findall(r'class\s+(\w+)\s+extends\s+(\w+)', content)
+        if extends_matches:
+            relationships["inheritance"] = [f"{child} extends {parent}" for child, parent in extends_matches]
+        
+        # Add LLM analysis
+        if llm_analysis and "relationships" in llm_analysis:
+            relationships.update(llm_analysis["relationships"])
+            
+        return relationships
+    
+    def _calculate_complexity_metrics(self, content: str) -> Dict[str, float]:
+        """Calculate code complexity metrics."""
+        metrics = {}
+        
+        lines = content.split('\n')
+        metrics["lines_of_code"] = len([line for line in lines if line.strip()])
+        metrics["comment_ratio"] = len([line for line in lines if line.strip().startswith('//')]) / len(lines)
+        
+        # Cyclomatic complexity (simplified)
+        complexity_keywords = ['if', 'else', 'for', 'while', 'switch', 'case', '&&', '||']
+        complexity_count = sum(content.count(keyword) for keyword in complexity_keywords)
+        metrics["cyclomatic_complexity"] = complexity_count
+        
+        # Nesting depth (simplified)
+        max_depth = 0
+        current_depth = 0
+        for char in content:
+            if char == '{':
+                current_depth += 1
+                max_depth = max(max_depth, current_depth)
+            elif char == '}':
+                current_depth -= 1
+        metrics["max_nesting_depth"] = max_depth
+        
+        return metrics
+    
+    def _assess_code_quality(
+        self, content: str, llm_analysis: Dict[str, Any], metrics: Dict[str, float]
+    ) -> Dict[str, Any]:
+        """Assess code quality indicators."""
+        indicators = {}
+        
+        # Basic quality checks
+        indicators["has_documentation"] = "///" in content or "/**" in content
+        indicators["has_error_handling"] = "try" in content and "catch" in content
+        indicators["complexity_score"] = min(10, max(1, 10 - metrics.get("cyclomatic_complexity", 0) / 5))
+        
+        # Add LLM quality assessment
+        if llm_analysis and "quality" in llm_analysis:
+            indicators.update(llm_analysis["quality"])
+            
+        return indicators
+    
+    def _generate_code_suggestions(
+        self, content: str, llm_analysis: Dict[str, Any], quality: Dict[str, Any]
+    ) -> List[str]:
+        """Generate code improvement suggestions."""
+        suggestions = []
+        
+        # Basic suggestions based on metrics
+        if not quality.get("has_documentation"):
+            suggestions.append("Add documentation comments for better code understanding")
+        
+        if not quality.get("has_error_handling"):
+            suggestions.append("Consider adding error handling for robustness")
+        
+        if quality.get("complexity_score", 10) < 5:
+            suggestions.append("Consider refactoring to reduce complexity")
+        
+        # Add LLM suggestions
+        if llm_analysis and "suggestions" in llm_analysis:
+            if isinstance(llm_analysis["suggestions"], list):
+                suggestions.extend(llm_analysis["suggestions"])
+        
+        return suggestions
+    
+    async def _update_project_patterns(self, patterns: List[CodePattern]) -> None:
+        """Update project-level pattern knowledge."""
+        for pattern in patterns:
+            if pattern.pattern_id in self.code_patterns:
+                # Update existing pattern
+                existing = self.code_patterns[pattern.pattern_id]
+                existing.frequency += pattern.frequency
+                existing.confidence = (existing.confidence + pattern.confidence) / 2
+            else:
+                # Add new pattern
+                self.code_patterns[pattern.pattern_id] = pattern
 
     async def _execute_specialized_processing(
         self,
