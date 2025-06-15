@@ -506,3 +506,151 @@ class AdaptationResult:
     monitoring_checkpoints: List[Dict[str, Any]] = field(default_factory=list)
 
 
+# Tool Coordination Models
+
+@dataclass
+class ToolConflict:
+    """Represents a tool access conflict between agents."""
+    conflict_id: str = field(default_factory=lambda: str(uuid4()))
+    tool_name: str = ""
+    operation_type: str = ""
+    conflicting_agents: List[str] = field(default_factory=list)
+    priority_scores: Dict[str, float] = field(default_factory=dict)
+    requested_at: datetime = field(default_factory=datetime.now)
+    conflict_type: str = "resource_contention"  # "resource_contention", "exclusive_access", "version_mismatch"
+    severity: str = "medium"  # "low", "medium", "high", "critical"
+    estimated_delay: float = 0.0  # estimated delay in seconds
+    resolution_strategy: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass 
+class Resolution:
+    """Represents a resolution to a tool conflict."""
+    resolution_id: str = field(default_factory=lambda: str(uuid4()))
+    conflict_id: str = ""
+    resolution_type: str = ""  # "priority_based", "queue", "parallel", "fallback", "alternative_tool"
+    assigned_agent: str = ""
+    queued_agents: List[str] = field(default_factory=list)
+    estimated_wait_time: float = 0.0
+    alternative_tools: List[str] = field(default_factory=list)
+    reasoning: str = ""
+    confidence_score: float = 0.0
+    implementation_plan: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class UsagePattern:
+    """Tool usage pattern analysis for an agent or tool."""
+    pattern_id: str = field(default_factory=lambda: str(uuid4()))
+    agent_id: Optional[str] = None
+    tool_name: Optional[str] = None
+    usage_frequency: float = 0.0  # operations per hour
+    average_duration: float = 0.0  # average operation duration
+    peak_usage_times: List[str] = field(default_factory=list)
+    common_operations: List[str] = field(default_factory=list)
+    success_rate: float = 0.0
+    resource_intensity: str = "low"  # "low", "medium", "high"
+    typical_parameters: Dict[str, Any] = field(default_factory=dict)
+    interdependencies: List[str] = field(default_factory=list)
+    pattern_confidence: float = 0.0
+
+
+@dataclass
+class AllocationPlan:
+    """Tool allocation plan for optimizing resource distribution."""
+    plan_id: str = field(default_factory=lambda: str(uuid4()))
+    created_at: datetime = field(default_factory=datetime.now)
+    agent_assignments: Dict[str, List[str]] = field(default_factory=dict)  # agent_id -> tool_names
+    tool_schedules: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)  # tool_name -> schedule
+    estimated_completion: Dict[str, datetime] = field(default_factory=dict)
+    resource_utilization: Dict[str, float] = field(default_factory=dict)
+    optimization_score: float = 0.0
+    conflicts_resolved: int = 0
+    efficiency_improvement: float = 0.0
+    implementation_order: List[str] = field(default_factory=list)
+    fallback_strategies: Dict[str, List[str]] = field(default_factory=dict)
+
+
+@dataclass
+class QueueStatus:
+    """Status of tool operation queues."""
+    queue_id: str = field(default_factory=lambda: str(uuid4()))
+    tool_name: str = ""
+    current_user: Optional[str] = None
+    queue_length: int = 0
+    waiting_agents: List[Dict[str, Any]] = field(default_factory=list)
+    estimated_wait_times: Dict[str, float] = field(default_factory=dict)
+    priority_queue: List[str] = field(default_factory=list)
+    average_processing_time: float = 0.0
+    queue_efficiency: float = 0.0
+    last_updated: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class SharedOperation:
+    """Coordinated operation involving multiple agents."""
+    operation_id: str = field(default_factory=lambda: str(uuid4()))
+    operation_type: str = ""
+    participating_agents: List[str] = field(default_factory=list)
+    coordination_strategy: str = "sequential"  # "sequential", "parallel", "leader_follower", "collaborative"
+    primary_agent: Optional[str] = None
+    shared_resources: List[str] = field(default_factory=list)
+    synchronization_points: List[Dict[str, Any]] = field(default_factory=list)
+    communication_protocol: str = "event_driven"
+    status: str = "planned"  # "planned", "active", "completed", "failed", "cancelled"
+    progress: Dict[str, float] = field(default_factory=dict)  # agent_id -> progress
+    results: Dict[str, Any] = field(default_factory=dict)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+@dataclass
+class CoordinationResult:
+    """Result of coordinating a shared operation."""
+    result_id: str = field(default_factory=lambda: str(uuid4()))
+    operation_id: str = ""
+    coordination_success: bool = False
+    participants_coordinated: List[str] = field(default_factory=list)
+    synchronization_achieved: bool = False
+    resource_conflicts_resolved: int = 0
+    efficiency_score: float = 0.0
+    total_coordination_time: float = 0.0
+    individual_results: Dict[str, Any] = field(default_factory=dict)
+    collective_outcome: Dict[str, Any] = field(default_factory=dict)
+    lessons_learned: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ToolCoordinationResult:
+    """Result of overall tool coordination process."""
+    coordination_id: str = field(default_factory=lambda: str(uuid4()))
+    timestamp: datetime = field(default_factory=datetime.now)
+    
+    # Allocation results
+    allocations_made: Dict[str, str] = field(default_factory=dict)  # agent_id -> tool_name
+    conflicts_resolved: List[Resolution] = field(default_factory=list)
+    optimizations_made: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # Performance metrics
+    overall_efficiency: float = 0.0
+    resource_utilization: Dict[str, float] = field(default_factory=dict)
+    queue_improvements: Dict[str, float] = field(default_factory=dict)
+    
+    # Coordination statistics
+    active_shared_operations: int = 0
+    coordination_events: int = 0
+    successful_coordinations: int = 0
+    failed_coordinations: int = 0
+    
+    # Insights and recommendations
+    usage_insights: List[str] = field(default_factory=list)
+    optimization_recommendations: List[str] = field(default_factory=list)
+    predicted_bottlenecks: List[str] = field(default_factory=list)
+    
+    # Future planning
+    next_coordination_schedule: Optional[datetime] = None
+    recommended_tool_additions: List[str] = field(default_factory=list)
+    capacity_warnings: List[str] = field(default_factory=list)
+
+
