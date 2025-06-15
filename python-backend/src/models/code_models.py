@@ -1354,3 +1354,1022 @@ class FixResult:
             "was_successful": self.was_successful(),
             "needs_manual_review": self.needs_manual_review()
         }
+
+
+@dataclass
+class PackageInfo:
+    """Information about a Flutter/Dart package."""
+    name: str
+    version: str
+    description: str = ""
+    platform_support: Dict[str, bool] = field(default_factory=dict)  # ios, android, web, desktop
+    alternatives: List[str] = field(default_factory=list)
+    dependencies: List[str] = field(default_factory=list)
+    dev_dependency: bool = False
+    required_permissions: List[str] = field(default_factory=list)
+    configuration_required: bool = False
+    bundle_size_impact: Optional[str] = None  # 'small', 'medium', 'large'
+    popularity_score: Optional[float] = None
+    maintenance_score: Optional[float] = None
+    feature_coverage: List[str] = field(default_factory=list)
+    initialization_code: Optional[str] = None
+    import_statement: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def supports_platform(self, platform: str) -> bool:
+        """Check if package supports a specific platform."""
+        return self.platform_support.get(platform, True)  # Default to True if unknown
+    
+    def get_version_constraint(self) -> str:
+        """Get recommended version constraint for pubspec.yaml."""
+        # Use caret constraint for semantic versioning
+        if self.version and self.version != "latest":
+            return f"^{self.version}"
+        return "^1.0.0"  # Default constraint
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "name": self.name,
+            "version": self.version,
+            "description": self.description,
+            "platform_support": self.platform_support,
+            "alternatives": self.alternatives,
+            "dependencies": self.dependencies,
+            "dev_dependency": self.dev_dependency,
+            "required_permissions": self.required_permissions,
+            "configuration_required": self.configuration_required,
+            "bundle_size_impact": self.bundle_size_impact,
+            "popularity_score": self.popularity_score,
+            "maintenance_score": self.maintenance_score,
+            "feature_coverage": self.feature_coverage,
+            "initialization_code": self.initialization_code,
+            "import_statement": self.import_statement,
+            "metadata": self.metadata
+        }
+
+
+@dataclass
+class CompatibilityReport:
+    """Report on package version compatibility."""
+    compatible_packages: List[str] = field(default_factory=list)
+    incompatible_packages: List[str] = field(default_factory=list)
+    conflict_details: Dict[str, str] = field(default_factory=dict)
+    suggested_resolutions: Dict[str, str] = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+    overall_compatibility: bool = True
+    flutter_version_required: Optional[str] = None
+    dart_version_required: Optional[str] = None
+    
+    def has_conflicts(self) -> bool:
+        """Check if there are any compatibility conflicts."""
+        return len(self.incompatible_packages) > 0 or not self.overall_compatibility
+    
+    def get_resolution_plan(self) -> Dict[str, Any]:
+        """Get a plan to resolve compatibility issues."""
+        return {
+            "conflicts_found": len(self.incompatible_packages),
+            "resolutions_available": len(self.suggested_resolutions),
+            "action_required": self.has_conflicts(),
+            "suggested_actions": list(self.suggested_resolutions.values()),
+            "warnings": self.warnings
+        }
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "compatible_packages": self.compatible_packages,
+            "incompatible_packages": self.incompatible_packages,
+            "conflict_details": self.conflict_details,
+            "suggested_resolutions": self.suggested_resolutions,
+            "warnings": self.warnings,
+            "overall_compatibility": self.overall_compatibility,
+            "flutter_version_required": self.flutter_version_required,
+            "dart_version_required": self.dart_version_required,
+            "has_conflicts": self.has_conflicts(),
+            "resolution_plan": self.get_resolution_plan()
+        }
+
+
+@dataclass
+class ConfigurationResult:
+    """Result of package configuration setup."""
+    package_name: str
+    configuration_successful: bool
+    files_modified: List[str] = field(default_factory=list)
+    configuration_steps: List[str] = field(default_factory=list)
+    initialization_code_added: bool = False
+    permissions_added: List[str] = field(default_factory=list)
+    platform_specific_setup: Dict[str, bool] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    next_steps: List[str] = field(default_factory=list)
+    
+    def was_successful(self) -> bool:
+        """Check if configuration was successful."""
+        return self.configuration_successful and len(self.errors) == 0
+    
+    def needs_manual_setup(self) -> bool:
+        """Check if manual setup is required."""
+        return len(self.next_steps) > 0 or len(self.errors) > 0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "package_name": self.package_name,
+            "configuration_successful": self.configuration_successful,
+            "files_modified": self.files_modified,
+            "configuration_steps": self.configuration_steps,
+            "initialization_code_added": self.initialization_code_added,
+            "permissions_added": self.permissions_added,
+            "platform_specific_setup": self.platform_specific_setup,
+            "errors": self.errors,
+            "warnings": self.warnings,
+            "next_steps": self.next_steps,
+            "was_successful": self.was_successful(),
+            "needs_manual_setup": self.needs_manual_setup()
+        }
+
+
+@dataclass
+class DependencyUpdate:
+    """Result of dependency management operation."""
+    update_id: str
+    added_packages: Dict[str, PackageInfo] = field(default_factory=dict)
+    updated_versions: Dict[str, Tuple[str, str]] = field(default_factory=dict)  # package -> (old_version, new_version)
+    removed_packages: List[str] = field(default_factory=list)
+    configuration_changes: Dict[str, ConfigurationResult] = field(default_factory=dict)
+    verification_results: Dict[str, bool] = field(default_factory=dict)
+    pubspec_backup_path: Optional[str] = None
+    success: bool = True
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    bundle_size_impact: Optional[str] = None
+    build_time_impact: Optional[str] = None
+    compatibility_report: Optional[CompatibilityReport] = None
+    next_steps: List[str] = field(default_factory=list)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_package_count_changes(self) -> Dict[str, int]:
+        """Get summary of package count changes."""
+        return {
+            "added": len(self.added_packages),
+            "updated": len(self.updated_versions),
+            "removed": len(self.removed_packages),
+            "configured": len([r for r in self.configuration_changes.values() if r.was_successful()])
+        }
+    
+    def has_issues(self) -> bool:
+        """Check if there are any issues with the update."""
+        return len(self.errors) > 0 or not self.success
+    
+    def needs_manual_intervention(self) -> bool:
+        """Check if manual intervention is needed."""
+        return (
+            len(self.next_steps) > 0 or
+            any(not result for result in self.verification_results.values()) or
+            any(config.needs_manual_setup() for config in self.configuration_changes.values())
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "update_id": self.update_id,
+            "added_packages": {name: pkg.to_dict() for name, pkg in self.added_packages.items()},
+            "updated_versions": self.updated_versions,
+            "removed_packages": self.removed_packages,
+            "configuration_changes": {name: config.to_dict() for name, config in self.configuration_changes.items()},
+            "verification_results": self.verification_results,
+            "pubspec_backup_path": self.pubspec_backup_path,
+            "success": self.success,
+            "errors": self.errors,
+            "warnings": self.warnings,
+            "bundle_size_impact": self.bundle_size_impact,
+            "build_time_impact": self.build_time_impact,
+            "compatibility_report": self.compatibility_report.to_dict() if self.compatibility_report else None,
+            "next_steps": self.next_steps,
+            "updated_at": self.updated_at.isoformat(),
+            "package_count_changes": self.get_package_count_changes(),
+            "has_issues": self.has_issues(),
+            "needs_manual_intervention": self.needs_manual_intervention()
+        }
+
+
+@dataclass
+class DependencyOptimization:
+    """Result of dependency optimization operation."""
+    optimization_id: str
+    removed_packages: List[str] = field(default_factory=list)
+    updated_packages: Dict[str, Tuple[str, str]] = field(default_factory=dict)  # package -> (old_version, new_version)
+    suggested_alternatives: Dict[str, str] = field(default_factory=dict)  # current_package -> suggested_alternative
+    size_savings: Dict[str, Any] = field(default_factory=dict)  # bundle_size_mb, assets_reduced, etc.
+    build_improvements: Dict[str, Any] = field(default_factory=dict)  # build_time_saved, dependency_count, etc.
+    unused_dependencies: List[str] = field(default_factory=list)
+    outdated_dependencies: Dict[str, str] = field(default_factory=dict)  # package -> latest_version
+    security_improvements: List[str] = field(default_factory=list)
+    performance_gains: List[str] = field(default_factory=list)
+    recommendations: List[str] = field(default_factory=list)
+    applied_optimizations: List[str] = field(default_factory=list)
+    skipped_optimizations: Dict[str, str] = field(default_factory=dict)  # optimization -> reason
+    verification_passed: bool = True
+    backup_created: bool = False
+    backup_path: Optional[str] = None
+    optimized_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_optimization_summary(self) -> Dict[str, Any]:
+        """Get summary of optimization results."""
+        return {
+            "packages_removed": len(self.removed_packages),
+            "packages_updated": len(self.updated_packages),
+            "alternatives_suggested": len(self.suggested_alternatives),
+            "optimizations_applied": len(self.applied_optimizations),
+            "optimizations_skipped": len(self.skipped_optimizations),
+            "estimated_size_savings_mb": self.size_savings.get("bundle_size_mb", 0),
+            "estimated_build_time_saved_seconds": self.build_improvements.get("build_time_saved_seconds", 0)
+        }
+    
+    def has_significant_improvements(self) -> bool:
+        """Check if optimization provides significant improvements."""
+        size_savings = self.size_savings.get("bundle_size_mb", 0)
+        build_time_saved = self.build_improvements.get("build_time_saved_seconds", 0)
+        packages_optimized = len(self.removed_packages) + len(self.updated_packages)
+        
+        return (
+            size_savings > 1.0 or  # More than 1MB saved
+            build_time_saved > 10 or  # More than 10 seconds saved
+            packages_optimized > 0  # Any packages optimized
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "optimization_id": self.optimization_id,
+            "removed_packages": self.removed_packages,
+            "updated_packages": self.updated_packages,
+            "suggested_alternatives": self.suggested_alternatives,
+            "size_savings": self.size_savings,
+            "build_improvements": self.build_improvements,
+            "unused_dependencies": self.unused_dependencies,
+            "outdated_dependencies": self.outdated_dependencies,
+            "security_improvements": self.security_improvements,
+            "performance_gains": self.performance_gains,
+            "recommendations": self.recommendations,
+            "applied_optimizations": self.applied_optimizations,
+            "skipped_optimizations": self.skipped_optimizations,
+            "verification_passed": self.verification_passed,
+            "backup_created": self.backup_created,
+            "backup_path": self.backup_path,
+            "optimized_at": self.optimized_at.isoformat(),
+            "optimization_summary": self.get_optimization_summary(),
+            "has_significant_improvements": self.has_significant_improvements()
+        }
+
+
+class ChangeType(Enum):
+    """Types of code changes for hot reload analysis."""
+    WIDGET_UPDATE = "widget_update"
+    STATE_CHANGE = "state_change"
+    FUNCTION_UPDATE = "function_update"
+    CLASS_MODIFICATION = "class_modification"
+    IMPORT_CHANGE = "import_change"
+    CONSTANT_UPDATE = "constant_update"
+    CONSTRUCTOR_CHANGE = "constructor_change"
+    BUILD_METHOD_CHANGE = "build_method_change"
+    LIFECYCLE_METHOD_CHANGE = "lifecycle_method_change"
+    GLOBAL_VARIABLE_CHANGE = "global_variable_change"
+    NEW_FILE = "new_file"
+    FILE_DELETION = "file_deletion"
+    ANNOTATION_CHANGE = "annotation_change"
+
+
+class StateImpact(Enum):
+    """Impact on widget state during hot reload."""
+    NONE = "none"  # No state impact
+    PRESERVES = "preserves"  # State is preserved
+    RESETS = "resets"  # State will be reset
+    UNKNOWN = "unknown"  # Impact cannot be determined
+
+
+class ReloadOutcome(Enum):
+    """Possible outcomes of hot reload operation."""
+    SUCCESS = "success"
+    FAILED_RESTART_REQUIRED = "failed_restart_required"
+    FAILED_COMPILATION_ERROR = "failed_compilation_error"
+    FAILED_RUNTIME_ERROR = "failed_runtime_error"
+    SKIPPED_INCOMPATIBLE = "skipped_incompatible"
+
+
+@dataclass
+class CodeChange:
+    """Information about a code change for hot reload analysis."""
+    change_id: str
+    file_path: str
+    change_type: ChangeType
+    affected_widgets: List[str] = field(default_factory=list)
+    state_impact: StateImpact = StateImpact.UNKNOWN
+    line_start: int = 0
+    line_end: int = 0
+    content_before: Optional[str] = None
+    content_after: Optional[str] = None
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def is_hot_reload_friendly(self) -> bool:
+        """Check if this change is typically hot reload friendly."""
+        friendly_changes = [
+            ChangeType.WIDGET_UPDATE,
+            ChangeType.FUNCTION_UPDATE,
+            ChangeType.CONSTANT_UPDATE,
+            ChangeType.BUILD_METHOD_CHANGE
+        ]
+        return self.change_type in friendly_changes
+    
+    def requires_restart(self) -> bool:
+        """Check if this change requires a full restart."""
+        restart_required = [
+            ChangeType.CONSTRUCTOR_CHANGE,
+            ChangeType.GLOBAL_VARIABLE_CHANGE,
+            ChangeType.NEW_FILE,
+            ChangeType.FILE_DELETION,
+            ChangeType.IMPORT_CHANGE
+        ]
+        return self.change_type in restart_required
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "change_id": self.change_id,
+            "file_path": self.file_path,
+            "change_type": self.change_type.value,
+            "affected_widgets": self.affected_widgets,
+            "state_impact": self.state_impact.value,
+            "line_start": self.line_start,
+            "line_end": self.line_end,
+            "content_before": self.content_before,
+            "content_after": self.content_after,
+            "timestamp": self.timestamp.isoformat(),
+            "metadata": self.metadata,
+            "is_hot_reload_friendly": self.is_hot_reload_friendly(),
+            "requires_restart": self.requires_restart()
+        }
+
+
+@dataclass
+class ReloadCompatibility:
+    """Prediction about hot reload compatibility for a set of changes."""
+    can_hot_reload: bool
+    requires_restart: bool
+    problematic_changes: List[str] = field(default_factory=list)
+    compatibility_score: float = 1.0  # 0.0 to 1.0
+    estimated_success_rate: float = 1.0
+    state_preservation_expected: bool = True
+    warnings: List[str] = field(default_factory=list)
+    recommendations: List[str] = field(default_factory=list)
+    batch_optimization_possible: bool = True
+    
+    def get_reload_strategy(self) -> str:
+        """Get recommended reload strategy."""
+        if self.requires_restart:
+            return "full_restart"
+        elif self.can_hot_reload and self.compatibility_score > 0.8:
+            return "hot_reload"
+        elif self.can_hot_reload and self.batch_optimization_possible:
+            return "batched_hot_reload"
+        else:
+            return "manual_verification_needed"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "can_hot_reload": self.can_hot_reload,
+            "requires_restart": self.requires_restart,
+            "problematic_changes": self.problematic_changes,
+            "compatibility_score": self.compatibility_score,
+            "estimated_success_rate": self.estimated_success_rate,
+            "state_preservation_expected": self.state_preservation_expected,
+            "warnings": self.warnings,
+            "recommendations": self.recommendations,
+            "batch_optimization_possible": self.batch_optimization_possible,
+            "reload_strategy": self.get_reload_strategy()
+        }
+
+
+@dataclass
+class ReloadFailure:
+    """Information about a hot reload failure."""
+    failure_id: str
+    failure_type: str
+    error_message: str
+    affected_files: List[str] = field(default_factory=list)
+    stack_trace: Optional[str] = None
+    suggested_fixes: List[str] = field(default_factory=list)
+    can_auto_recover: bool = False
+    recovery_confidence: float = 0.0
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "failure_id": self.failure_id,
+            "failure_type": self.failure_type,
+            "error_message": self.error_message,
+            "affected_files": self.affected_files,
+            "stack_trace": self.stack_trace,
+            "suggested_fixes": self.suggested_fixes,
+            "can_auto_recover": self.can_auto_recover,
+            "recovery_confidence": self.recovery_confidence,
+            "timestamp": self.timestamp.isoformat()
+        }
+
+
+@dataclass
+class RecoveryPlan:
+    """Plan for recovering from hot reload failures."""
+    plan_id: str
+    recovery_steps: List[str] = field(default_factory=list)
+    files_to_modify: List[str] = field(default_factory=list)
+    rollback_changes: List[str] = field(default_factory=list)
+    estimated_success_rate: float = 0.0
+    requires_manual_intervention: bool = True
+    automated_fixes_available: bool = False
+    
+    def can_auto_execute(self) -> bool:
+        """Check if recovery plan can be executed automatically."""
+        return (
+            self.automated_fixes_available and 
+            not self.requires_manual_intervention and 
+            self.estimated_success_rate > 0.7
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "plan_id": self.plan_id,
+            "recovery_steps": self.recovery_steps,
+            "files_to_modify": self.files_to_modify,
+            "rollback_changes": self.rollback_changes,
+            "estimated_success_rate": self.estimated_success_rate,
+            "requires_manual_intervention": self.requires_manual_intervention,
+            "automated_fixes_available": self.automated_fixes_available,
+            "can_auto_execute": self.can_auto_execute()
+        }
+
+
+@dataclass
+class DevelopmentSession:
+    """Information about an active development session."""
+    session_id: str
+    active_files: List[str] = field(default_factory=list)
+    running_processes: List[str] = field(default_factory=list)
+    reload_history: List[Dict[str, Any]] = field(default_factory=list)
+    session_start: datetime = field(default_factory=datetime.utcnow)
+    last_activity: datetime = field(default_factory=datetime.utcnow)
+    hot_reload_enabled: bool = True
+    target_device: Optional[str] = None
+    flutter_mode: str = "debug"  # debug, profile, release
+    watched_directories: List[str] = field(default_factory=list)
+    excluded_patterns: List[str] = field(default_factory=list)
+    performance_metrics: Dict[str, float] = field(default_factory=dict)
+    
+    def is_active(self) -> bool:
+        """Check if session is currently active."""
+        if not self.running_processes:
+            return False
+        
+        # Consider session inactive if no activity for more than 30 minutes
+        inactive_threshold = datetime.utcnow() - timedelta(minutes=30)
+        return self.last_activity > inactive_threshold
+    
+    def get_session_duration(self) -> timedelta:
+        """Get total session duration."""
+        end_time = self.last_activity if not self.is_active() else datetime.utcnow()
+        return end_time - self.session_start
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "session_id": self.session_id,
+            "active_files": self.active_files,
+            "running_processes": self.running_processes,
+            "reload_history": self.reload_history,
+            "session_start": self.session_start.isoformat(),
+            "last_activity": self.last_activity.isoformat(),
+            "hot_reload_enabled": self.hot_reload_enabled,
+            "target_device": self.target_device,
+            "flutter_mode": self.flutter_mode,
+            "watched_directories": self.watched_directories,
+            "excluded_patterns": self.excluded_patterns,
+            "performance_metrics": self.performance_metrics,
+            "is_active": self.is_active(),
+            "session_duration_minutes": self.get_session_duration().total_seconds() / 60
+        }
+
+
+@dataclass
+class HotReloadExperience:
+    """Results and metrics from a hot reload development session."""
+    experience_id: str
+    session_id: str
+    successful_reloads: int = 0
+    failed_reloads: int = 0
+    restart_count: int = 0
+    optimizations_applied: List[str] = field(default_factory=list)
+    productivity_metrics: Dict[str, float] = field(default_factory=dict)
+    reload_times: List[float] = field(default_factory=list)  # in seconds
+    failure_patterns: List[str] = field(default_factory=list)
+    success_patterns: List[str] = field(default_factory=list)
+    code_changes_processed: int = 0
+    state_preservation_rate: float = 0.0
+    developer_satisfaction_score: Optional[float] = None
+    recommendations_for_improvement: List[str] = field(default_factory=list)
+    experience_start: datetime = field(default_factory=datetime.utcnow)
+    experience_end: Optional[datetime] = None
+    
+    def get_success_rate(self) -> float:
+        """Calculate hot reload success rate."""
+        total_attempts = self.successful_reloads + self.failed_reloads
+        if total_attempts == 0:
+            return 1.0
+        return self.successful_reloads / total_attempts
+    
+    def get_average_reload_time(self) -> float:
+        """Get average hot reload time in seconds."""
+        if not self.reload_times:
+            return 0.0
+        return sum(self.reload_times) / len(self.reload_times)
+    
+    def get_productivity_score(self) -> float:
+        """Calculate overall productivity score (0-100)."""
+        success_rate = self.get_success_rate()
+        avg_reload_time = self.get_average_reload_time()
+        
+        # Base score from success rate
+        score = success_rate * 70
+        
+        # Penalty for slow reloads (ideal is under 1 second)
+        if avg_reload_time > 1.0:
+            time_penalty = min(20, (avg_reload_time - 1.0) * 10)
+            score -= time_penalty
+        
+        # Bonus for optimizations
+        optimization_bonus = min(10, len(self.optimizations_applied) * 2)
+        score += optimization_bonus
+        
+        # Penalty for too many restarts
+        restart_penalty = min(10, self.restart_count * 2)
+        score -= restart_penalty
+        
+        return max(0, min(100, score))
+    
+    def needs_improvement(self) -> bool:
+        """Check if the development experience needs improvement."""
+        return (
+            self.get_success_rate() < 0.8 or
+            self.get_average_reload_time() > 2.0 or
+            self.restart_count > 5
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "experience_id": self.experience_id,
+            "session_id": self.session_id,
+            "successful_reloads": self.successful_reloads,
+            "failed_reloads": self.failed_reloads,
+            "restart_count": self.restart_count,
+            "optimizations_applied": self.optimizations_applied,
+            "productivity_metrics": self.productivity_metrics,
+            "reload_times": self.reload_times,
+            "failure_patterns": self.failure_patterns,
+            "success_patterns": self.success_patterns,
+            "code_changes_processed": self.code_changes_processed,
+            "state_preservation_rate": self.state_preservation_rate,
+            "developer_satisfaction_score": self.developer_satisfaction_score,
+            "recommendations_for_improvement": self.recommendations_for_improvement,
+            "experience_start": self.experience_start.isoformat(),
+            "experience_end": self.experience_end.isoformat() if self.experience_end else None,
+            "success_rate": self.get_success_rate(),
+            "average_reload_time_seconds": self.get_average_reload_time(),
+            "productivity_score": self.get_productivity_score(),
+            "needs_improvement": self.needs_improvement()
+        }
+
+
+# Feature-Complete Generation Models
+
+class FeatureType(Enum):
+    """Types of features that can be generated."""
+    AUTHENTICATION = "authentication"
+    CRUD_OPERATIONS = "crud_operations"
+    USER_INTERFACE = "user_interface"
+    DATA_VISUALIZATION = "data_visualization"
+    PAYMENT_INTEGRATION = "payment_integration"
+    SOCIAL_FEATURES = "social_features"
+    NOTIFICATION_SYSTEM = "notification_system"
+    FILE_MANAGEMENT = "file_management"
+    SEARCH_FUNCTIONALITY = "search_functionality"
+    MESSAGING_SYSTEM = "messaging_system"
+    ANALYTICS_INTEGRATION = "analytics_integration"
+    OFFLINE_SUPPORT = "offline_support"
+    CUSTOM_BUSINESS_LOGIC = "custom_business_logic"
+
+
+class ComponentType(Enum):
+    """Types of components in a feature implementation."""
+    MODEL = "model"
+    REPOSITORY = "repository"
+    SERVICE = "service"
+    BLOC_CUBIT = "bloc_cubit"
+    WIDGET = "widget"
+    SCREEN = "screen"
+    ROUTE = "route"
+    TEST = "test"
+    CONFIGURATION = "configuration"
+    DEPENDENCY_INJECTION = "dependency_injection"
+
+
+class ArchitectureLayer(Enum):
+    """Architecture layers for feature organization."""
+    PRESENTATION = "presentation"
+    DOMAIN = "domain"
+    DATA = "data"
+    INFRASTRUCTURE = "infrastructure"
+    SHARED = "shared"
+
+
+class StylePattern(Enum):
+    """Code style patterns that can be adapted."""
+    NAMING_CONVENTION = "naming_convention"
+    FILE_STRUCTURE = "file_structure"
+    IMPORT_ORGANIZATION = "import_organization"
+    WIDGET_COMPOSITION = "widget_composition"
+    STATE_MANAGEMENT = "state_management"
+    ERROR_HANDLING = "error_handling"
+    DOCUMENTATION = "documentation"
+    TESTING = "testing"
+    ARCHITECTURE = "architecture"
+
+
+class StyleComplexity(Enum):
+    """Complexity levels for style patterns."""
+    SIMPLE = "simple"
+    MODERATE = "moderate"
+    COMPLEX = "complex"
+    ENTERPRISE = "enterprise"
+
+
+@dataclass
+class UIRequirement:
+    """Represents UI requirements for a feature."""
+    screen_name: str
+    widget_types: List[str]
+    layout_pattern: str
+    navigation_flow: List[str]
+    state_management_approach: str
+    styling_requirements: Dict[str, Any]
+    responsive_behavior: Dict[str, str]
+    accessibility_requirements: List[str]
+    animations: List[str] = field(default_factory=list)
+    custom_components: List[str] = field(default_factory=list)
+
+
+@dataclass
+class DataRequirement:
+    """Represents data requirements for a feature."""
+    models: List[str]
+    relationships: Dict[str, List[str]]
+    persistence_strategy: str
+    caching_requirements: List[str]
+    validation_rules: Dict[str, List[str]]
+    transformation_needs: Dict[str, str]
+    migration_requirements: List[str] = field(default_factory=list)
+    indexing_strategy: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class BusinessLogicRequirement:
+    """Represents business logic requirements for a feature."""
+    use_cases: List[str]
+    business_rules: Dict[str, List[str]]
+    workflows: List[Dict[str, Any]]
+    integration_points: List[str]
+    security_requirements: List[str]
+    performance_requirements: Dict[str, str]
+    error_scenarios: List[str]
+    notification_triggers: List[str] = field(default_factory=list)
+
+
+@dataclass
+class APIRequirement:
+    """Represents API requirements for a feature."""
+    endpoints: List[Dict[str, Any]]
+    authentication_method: str
+    data_formats: List[str]
+    error_handling_strategy: str
+    caching_strategy: str
+    offline_behavior: str
+    rate_limiting: Dict[str, Any]
+    security_headers: List[str] = field(default_factory=list)
+
+
+@dataclass
+class TestingRequirement:
+    """Represents testing requirements for a feature."""
+    unit_test_coverage: float
+    widget_tests: List[str]
+    integration_tests: List[str]
+    performance_tests: List[str]
+    accessibility_tests: List[str]
+    mock_strategies: Dict[str, str]
+    test_data_requirements: List[str]
+    automation_level: str = "high"
+
+
+@dataclass
+class FeatureSpecification:
+    """Complete specification for feature generation."""
+    feature_id: str
+    feature_name: str
+    feature_type: FeatureType
+    description: str
+    ui_requirements: UIRequirement
+    data_requirements: DataRequirement
+    business_logic_requirements: BusinessLogicRequirement
+    api_requirements: Optional[APIRequirement]
+    testing_requirements: TestingRequirement
+    architecture_constraints: Dict[str, Any]
+    dependencies: List[str]
+    priority: str
+    timeline: Dict[str, str]
+    acceptance_criteria: List[str]
+    performance_targets: Dict[str, float] = field(default_factory=dict)
+    security_requirements: List[str] = field(default_factory=list)
+    compliance_requirements: List[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class GeneratedComponent:
+    """Represents a generated code component."""
+    component_id: str
+    component_type: ComponentType
+    file_path: str
+    content: str
+    dependencies: List[str]
+    exports: List[str]
+    architecture_layer: ArchitectureLayer
+    test_file_path: Optional[str] = None
+    documentation: str = ""
+    complexity_score: float = 0.0
+    performance_considerations: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ImplementationPlan:
+    """Plan for implementing a complete feature."""
+    plan_id: str
+    feature_id: str
+    components: List[Dict[str, Any]]
+    dependency_graph: Dict[str, List[str]]
+    implementation_order: List[str]
+    integration_points: List[Dict[str, Any]]
+    risk_assessment: Dict[str, str]
+    estimated_effort: Dict[str, float]
+    architecture_decisions: List[str]
+    validation_checkpoints: List[str] = field(default_factory=list)
+
+
+@dataclass
+class FeatureImplementation:
+    """Complete implementation result for a feature."""
+    implementation_id: str
+    feature_specification: FeatureSpecification
+    implementation_plan: ImplementationPlan
+    generated_components: List[GeneratedComponent]
+    wiring_configuration: Dict[str, Any]
+    routing_setup: Dict[str, Any]
+    dependency_injection_setup: Dict[str, Any]
+    testing_suite: Dict[str, Any]
+    documentation: str
+    validation_results: List[ValidationResult]
+    performance_metrics: Dict[str, float]
+    implementation_time: float
+    success_indicators: Dict[str, bool]
+    follow_up_tasks: List[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_implementation_quality_score(self) -> float:
+        """Calculate overall implementation quality score."""
+        score = 0.0
+        total_weight = 0.0
+        
+        # Component quality (30%)
+        if self.generated_components:
+            component_scores = [comp.complexity_score for comp in self.generated_components if comp.complexity_score > 0]
+            if component_scores:
+                avg_component_score = sum(component_scores) / len(component_scores)
+                score += avg_component_score * 0.3
+                total_weight += 0.3
+        
+        # Validation results (25%)
+        if self.validation_results:
+            passed_validations = sum(1 for result in self.validation_results if result.is_valid)
+            validation_score = (passed_validations / len(self.validation_results)) * 100
+            score += validation_score * 0.25
+            total_weight += 0.25
+        
+        # Success indicators (25%)
+        if self.success_indicators:
+            success_rate = sum(self.success_indicators.values()) / len(self.success_indicators)
+            score += success_rate * 100 * 0.25
+            total_weight += 0.25
+        
+        # Performance metrics (20%)
+        if self.performance_metrics:
+            # Normalize performance metrics (assuming higher values are better)
+            performance_score = min(100, sum(self.performance_metrics.values()) / len(self.performance_metrics))
+            score += performance_score * 0.2
+            total_weight += 0.2
+        
+        return score / total_weight if total_weight > 0 else 0.0
+    
+    def get_completion_status(self) -> str:
+        """Get the completion status of the implementation."""
+        if not self.success_indicators:
+            return "incomplete"
+        
+        success_rate = sum(self.success_indicators.values()) / len(self.success_indicators)
+        
+        if success_rate >= 0.95:
+            return "complete"
+        elif success_rate >= 0.8:
+            return "mostly_complete"
+        elif success_rate >= 0.5:
+            return "partially_complete"
+        else:
+            return "incomplete"
+
+
+# Code Style Adaptation Models
+
+@dataclass
+class StyleRule:
+    """Represents a code style rule."""
+    rule_id: str
+    pattern: StylePattern
+    description: str
+    example_correct: str
+    example_incorrect: str
+    enforcement_level: str  # "error", "warning", "suggestion"
+    context_conditions: List[str]
+    auto_fixable: bool = True
+    complexity: StyleComplexity = StyleComplexity.SIMPLE
+
+
+@dataclass
+class StyleAnalysis:
+    """Analysis of existing code style patterns."""
+    project_path: str
+    analyzed_files: List[str]
+    discovered_patterns: Dict[StylePattern, List[str]]
+    consistency_scores: Dict[StylePattern, float]
+    common_violations: List[Dict[str, Any]]
+    recommended_rules: List[StyleRule]
+    confidence_scores: Dict[str, float]
+    analysis_timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class CodeStyle:
+    """Comprehensive code style definition."""
+    style_id: str
+    style_name: str
+    description: str
+    rules: List[StyleRule]
+    naming_conventions: Dict[str, str]
+    file_organization: Dict[str, List[str]]
+    architecture_preferences: Dict[str, str]
+    formatting_preferences: Dict[str, Any]
+    linting_configuration: Dict[str, Any]
+    documentation_standards: Dict[str, str]
+    testing_standards: Dict[str, str]
+    performance_guidelines: List[str] = field(default_factory=list)
+    security_guidelines: List[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_style_complexity(self) -> StyleComplexity:
+        """Determine the overall complexity of this style."""
+        complex_rules = sum(1 for rule in self.rules if rule.complexity in [StyleComplexity.COMPLEX, StyleComplexity.ENTERPRISE])
+        
+        if complex_rules > len(self.rules) * 0.5:
+            return StyleComplexity.ENTERPRISE
+        elif complex_rules > len(self.rules) * 0.3:
+            return StyleComplexity.COMPLEX
+        elif complex_rules > len(self.rules) * 0.1:
+            return StyleComplexity.MODERATE
+        else:
+            return StyleComplexity.SIMPLE
+
+
+@dataclass
+class StyleApplication:
+    """Result of applying a style rule to code."""
+    rule_id: str
+    file_path: str
+    original_code: str
+    modified_code: str
+    changes_applied: List[str]
+    confidence_score: float
+    manual_review_needed: bool
+    application_time: float
+    success: bool = True
+    error_message: Optional[str] = None
+
+
+@dataclass
+class StyleAdaptation:
+    """Result of adapting code to a target style."""
+    adaptation_id: str
+    source_files: List[str]
+    target_style: CodeStyle
+    style_analysis: StyleAnalysis
+    applications: List[StyleApplication]
+    adaptation_summary: Dict[str, Any]
+    quality_improvements: Dict[str, float]
+    consistency_improvements: Dict[str, float]
+    adaptation_time: float
+    success_rate: float
+    manual_review_items: List[str] = field(default_factory=list)
+    follow_up_recommendations: List[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_adaptation_quality_score(self) -> float:
+        """Calculate the quality of the style adaptation."""
+        if not self.applications:
+            return 0.0
+        
+        # Base score from success rate
+        base_score = self.success_rate * 60
+        
+        # Bonus for confidence
+        avg_confidence = sum(app.confidence_score for app in self.applications) / len(self.applications)
+        confidence_bonus = avg_confidence * 25
+        
+        # Bonus for consistency improvements
+        consistency_bonus = sum(self.consistency_improvements.values()) / len(self.consistency_improvements) * 15 if self.consistency_improvements else 0
+        
+        # Penalty for manual review items
+        manual_review_penalty = min(10, len(self.manual_review_items) * 2)
+        
+        return max(0, min(100, base_score + confidence_bonus + consistency_bonus - manual_review_penalty))
+
+
+# Performance Benchmarking Models
+
+@dataclass
+class PerformanceMetric:
+    """Individual performance metric measurement."""
+    metric_name: str
+    value: float
+    unit: str
+    timestamp: datetime
+    context: Dict[str, Any] = field(default_factory=dict)
+    baseline_value: Optional[float] = None
+    
+    def get_improvement_percentage(self) -> Optional[float]:
+        """Calculate improvement percentage from baseline."""
+        if self.baseline_value is None or self.baseline_value == 0:
+            return None
+        return ((self.value - self.baseline_value) / self.baseline_value) * 100
+
+
+@dataclass
+class BenchmarkResult:
+    """Complete benchmark results for agent performance."""
+    benchmark_id: str
+    agent_version: str
+    test_suite: str
+    metrics: List[PerformanceMetric]
+    execution_time: float
+    resource_usage: Dict[str, float]
+    success_indicators: Dict[str, bool]
+    comparison_baseline: Optional[str] = None
+    environment_info: Dict[str, str] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_overall_performance_score(self) -> float:
+        """Calculate overall performance score."""
+        if not self.metrics:
+            return 0.0
+        
+        # Weight different metrics appropriately
+        weighted_scores = []
+        
+        for metric in self.metrics:
+            improvement = metric.get_improvement_percentage()
+            if improvement is not None:
+                # Convert improvement to a 0-100 score
+                score = min(100, max(0, 50 + improvement))
+                weighted_scores.append(score)
+        
+        return sum(weighted_scores) / len(weighted_scores) if weighted_scores else 0.0
