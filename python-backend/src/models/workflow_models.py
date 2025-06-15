@@ -173,12 +173,12 @@ class EnvironmentSetupResult:
     status: SetupStatus
     setup_time: datetime = field(default_factory=datetime.utcnow)
     setup_duration: float = 0.0  # seconds
-    issues: List[EnvironmentIssue] = field(default_factory=list)
+    issues: List['EnvironmentIssue'] = field(default_factory=list)
     recommendations: List[str] = field(default_factory=list)
     completed_requirements: List[Requirement] = field(default_factory=list)
     failed_requirements: List[Requirement] = field(default_factory=list)
     validation_results: Dict[str, ValidationResult] = field(default_factory=dict)
-    environment_state: Optional[EnvironmentState] = None
+    environment_state: Optional['EnvironmentState'] = None
     next_steps: List[str] = field(default_factory=list)
     manual_intervention_required: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -585,7 +585,7 @@ class WorkflowSession:
     progress_percentage: float = 0.0
     
     # Environment and resources
-    environment_state: Optional[EnvironmentState] = None
+    environment_state: Optional['EnvironmentState'] = None
     resource_requirements: ResourceRequirement = field(default_factory=ResourceRequirement)
     allocated_agents: Set[str] = field(default_factory=set)
     
