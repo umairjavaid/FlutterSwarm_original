@@ -77,6 +77,38 @@ class RiskLevel(Enum):
     CRITICAL = "critical"
 
 
+class IssueSeverity(Enum):
+    """Severity levels for validation issues."""
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
+
+
+class IssueType(Enum):
+    """Types of validation issues."""
+    SYNTAX_ERROR = "syntax_error"
+    TYPE_ERROR = "type_error"
+    NULL_SAFETY = "null_safety"
+    ARCHITECTURE_VIOLATION = "architecture_violation"
+    PERFORMANCE_ISSUE = "performance_issue"
+    STYLE_VIOLATION = "style_violation"
+    LINT_WARNING = "lint_warning"
+    UNUSED_IMPORT = "unused_import"
+    DEAD_CODE = "dead_code"
+    COMPLEXITY_WARNING = "complexity_warning"
+    SECURITY_ISSUE = "security_issue"
+
+
+class ChangeType(Enum):
+    """Types of code changes."""
+    FILE_ADDED = "file_added"
+    FILE_MODIFIED = "file_modified"
+    FILE_DELETED = "file_deleted"
+    FILE_RENAMED = "file_renamed"
+    CONTENT_CHANGED = "content_changed"
+
+
 @dataclass
 class CodePattern:
     """Represents a discovered code pattern in the project."""
@@ -904,4 +936,421 @@ class RefactoringResult:
             "was_successful": self.was_successful(),
             "needs_rollback": self.needs_rollback(),
             "rollback_details": self.get_rollback_info()
+        }
+
+
+@dataclass
+class CodeChanges:
+    """Represents code changes to be validated."""
+    change_id: str
+    changed_files: List[str] = field(default_factory=list)
+    change_types: Dict[str, ChangeType] = field(default_factory=dict)
+    file_contents: Dict[str, str] = field(default_factory=dict)  # file_path -> content
+    context: Optional[ProjectContext] = None
+    validate_full_project: bool = False
+    include_tests: bool = True
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_affected_files(self) -> List[str]:
+        """Get all files affected by the changes."""
+        return list(set(self.changed_files + list(self.file_contents.keys())))
+    
+    def has_file_type(self, file_extension: str) -> bool:
+        """Check if changes include files of specific type."""
+        return any(f.endswith(file_extension) for f in self.get_affected_files())
+    
+    def get_dart_files(self) -> List[str]:
+        """Get only Dart files from the changes."""
+        return [f for f in self.get_affected_files() if f.endswith('.dart')]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "change_id": self.change_id,
+            "changed_files": self.changed_files,
+            "change_types": {k: v.value for k, v in self.change_types.items()},
+            "file_contents": self.file_contents,
+            "context": self.context.to_dict() if self.context else None,
+            "validate_full_project": self.validate_full_project,
+            "include_tests": self.include_tests,
+            "metadata": self.metadata,
+            "timestamp": self.timestamp.isoformat(),
+            "affected_files": self.get_affected_files(),
+            "dart_files_count": len(self.get_dart_files())
+        }
+
+
+@dataclass
+class ValidationIssue:
+    """Represents a validation issue found in code."""
+    issue_id: str
+    issue_type: IssueType
+    severity: IssueSeverity
+    description: str
+    file_path: str
+    line_number: Optional[int] = None
+    column_number: Optional[int] = None
+    code_snippet: Optional[str] = None
+    suggested_fix: Optional[str] = None
+    rule_name: Optional[str] = None
+    category: Optional[str] = None
+    auto_fixable: bool = False
+    fix_confidence: float = 0.0
+    related_issues: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    detected_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def is_blocking(self) -> bool:
+        """Check if this issue blocks compilation or execution."""
+        blocking_types = {
+            IssueType.SYNTAX_ERROR,
+            IssueType.TYPE_ERROR,
+            IssueType.NULL_SAFETY
+        }
+        return self.issue_type in blocking_types or self.severity == IssueSeverity.CRITICAL
+    
+    def can_auto_fix(self) -> bool:
+        """Check if this issue can be automatically fixed."""
+        return self.auto_fixable and self.fix_confidence > 0.7
+    
+    def get_priority_score(self) -> float:
+        """Calculate priority score for fixing order."""
+        severity_scores = {
+            IssueSeverity.CRITICAL: 10.0,
+            IssueSeverity.ERROR: 8.0,
+            IssueSeverity.WARNING: 5.0,
+            IssueSeverity.INFO: 2.0
+        }
+        
+        base_score = severity_scores.get(self.severity, 1.0)
+        
+        # Boost score for blocking issues
+        if self.is_blocking():
+            base_score *= 2.0
+        
+        # Boost score for auto-fixable issues
+        if self.can_auto_fix():
+            base_score *= 1.5
+        
+        return base_score
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "issue_id": self.issue_id,
+            "issue_type": self.issue_type.value,
+            "severity": self.severity.value,
+            "description": self.description,
+            "file_path": self.file_path,
+            "line_number": self.line_number,
+            "column_number": self.column_number,
+            "code_snippet": self.code_snippet,
+            "suggested_fix": self.suggested_fix,
+            "rule_name": self.rule_name,
+            "category": self.category,
+            "auto_fixable": self.auto_fixable,
+            "fix_confidence": self.fix_confidence,
+            "related_issues": self.related_issues,
+            "metadata": self.metadata,
+            "detected_at": self.detected_at.isoformat(),
+            "is_blocking": self.is_blocking(),
+            "can_auto_fix": self.can_auto_fix(),
+            "priority_score": self.get_priority_score()
+        }
+
+
+@dataclass
+class SyntaxIssue:
+    """Specific syntax issue representation."""
+    error_type: str
+    message: str
+    line: int
+    column: int
+    context: str = ""
+    expected: Optional[str] = None
+    actual: Optional[str] = None
+    
+    def to_validation_issue(self, file_path: str, issue_id: str) -> ValidationIssue:
+        """Convert to ValidationIssue."""
+        return ValidationIssue(
+            issue_id=issue_id,
+            issue_type=IssueType.SYNTAX_ERROR,
+            severity=IssueSeverity.ERROR,
+            description=f"{self.error_type}: {self.message}",
+            file_path=file_path,
+            line_number=self.line,
+            column_number=self.column,
+            code_snippet=self.context,
+            metadata={
+                "expected": self.expected,
+                "actual": self.actual,
+                "error_type": self.error_type
+            }
+        )
+
+
+@dataclass
+class ArchitectureIssue:
+    """Architecture compliance issue."""
+    violation_type: str
+    pattern_expected: str
+    pattern_found: str
+    recommendation: str
+    impact_level: str = "medium"
+    
+    def to_validation_issue(self, file_path: str, issue_id: str, line_number: Optional[int] = None) -> ValidationIssue:
+        """Convert to ValidationIssue."""
+        severity_map = {
+            "low": IssueSeverity.INFO,
+            "medium": IssueSeverity.WARNING,
+            "high": IssueSeverity.ERROR,
+            "critical": IssueSeverity.CRITICAL
+        }
+        
+        return ValidationIssue(
+            issue_id=issue_id,
+            issue_type=IssueType.ARCHITECTURE_VIOLATION,
+            severity=severity_map.get(self.impact_level, IssueSeverity.WARNING),
+            description=f"Architecture violation: {self.violation_type}",
+            file_path=file_path,
+            line_number=line_number,
+            suggested_fix=self.recommendation,
+            metadata={
+                "violation_type": self.violation_type,
+                "pattern_expected": self.pattern_expected,
+                "pattern_found": self.pattern_found,
+                "impact_level": self.impact_level
+            }
+        )
+
+
+@dataclass
+class PerformanceIssue:
+    """Performance issue representation."""
+    issue_category: str
+    description: str
+    impact: str
+    suggestion: str
+    complexity_increase: Optional[str] = None
+    
+    def to_validation_issue(self, file_path: str, issue_id: str, line_number: Optional[int] = None) -> ValidationIssue:
+        """Convert to ValidationIssue."""
+        impact_severity = {
+            "low": IssueSeverity.INFO,
+            "medium": IssueSeverity.WARNING,
+            "high": IssueSeverity.ERROR
+        }
+        
+        return ValidationIssue(
+            issue_id=issue_id,
+            issue_type=IssueType.PERFORMANCE_ISSUE,
+            severity=impact_severity.get(self.impact, IssueSeverity.WARNING),
+            description=f"Performance: {self.description}",
+            file_path=file_path,
+            line_number=line_number,
+            suggested_fix=self.suggestion,
+            category="performance",
+            metadata={
+                "issue_category": self.issue_category,
+                "impact": self.impact,
+                "complexity_increase": self.complexity_increase
+            }
+        )
+
+
+@dataclass
+class StyleFixResult:
+    """Result of applying style fixes."""
+    files_processed: List[str] = field(default_factory=list)
+    fixes_applied: List[str] = field(default_factory=list)
+    formatting_changes: Dict[str, int] = field(default_factory=dict)  # file -> line count
+    lint_fixes: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    success: bool = True
+    
+    def get_total_changes(self) -> int:
+        """Get total number of changes made."""
+        return sum(self.formatting_changes.values()) + len(self.lint_fixes)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "files_processed": self.files_processed,
+            "fixes_applied": self.fixes_applied,
+            "formatting_changes": self.formatting_changes,
+            "lint_fixes": self.lint_fixes,
+            "errors": self.errors,
+            "success": self.success,
+            "total_changes": self.get_total_changes()
+        }
+
+
+@dataclass
+class ValidationResult:
+    """Result of comprehensive code validation."""
+    validation_id: str
+    syntax_issues: List[ValidationIssue] = field(default_factory=list)
+    architecture_issues: List[ValidationIssue] = field(default_factory=list)
+    performance_issues: List[ValidationIssue] = field(default_factory=list)
+    style_issues: List[ValidationIssue] = field(default_factory=list)
+    all_issues: List[ValidationIssue] = field(default_factory=list)
+    auto_fixed: List[str] = field(default_factory=list)
+    files_validated: List[str] = field(default_factory=list)
+    validation_passed: bool = True
+    blocking_issues_count: int = 0
+    total_issues_count: int = 0
+    fix_suggestions: List[str] = field(default_factory=list)
+    performance_metrics: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    validated_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def __post_init__(self):
+        """Calculate derived fields after initialization."""
+        self.all_issues = (
+            self.syntax_issues + 
+            self.architecture_issues + 
+            self.performance_issues + 
+            self.style_issues
+        )
+        self.total_issues_count = len(self.all_issues)
+        self.blocking_issues_count = len([issue for issue in self.all_issues if issue.is_blocking()])
+        self.validation_passed = self.blocking_issues_count == 0
+    
+    def get_issues_by_severity(self, severity: IssueSeverity) -> List[ValidationIssue]:
+        """Get issues filtered by severity."""
+        return [issue for issue in self.all_issues if issue.severity == severity]
+    
+    def get_issues_by_type(self, issue_type: IssueType) -> List[ValidationIssue]:
+        """Get issues filtered by type."""
+        return [issue for issue in self.all_issues if issue.issue_type == issue_type]
+    
+    def get_auto_fixable_issues(self) -> List[ValidationIssue]:
+        """Get issues that can be automatically fixed."""
+        return [issue for issue in self.all_issues if issue.can_auto_fix()]
+    
+    def get_issues_by_file(self, file_path: str) -> List[ValidationIssue]:
+        """Get issues for a specific file."""
+        return [issue for issue in self.all_issues if issue.file_path == file_path]
+    
+    def get_priority_ordered_issues(self) -> List[ValidationIssue]:
+        """Get issues ordered by priority score."""
+        return sorted(self.all_issues, key=lambda x: x.get_priority_score(), reverse=True)
+    
+    def has_critical_issues(self) -> bool:
+        """Check if there are any critical issues."""
+        return any(issue.severity == IssueSeverity.CRITICAL for issue in self.all_issues)
+    
+    def get_summary_stats(self) -> Dict[str, int]:
+        """Get summary statistics."""
+        stats = {
+            "total_issues": self.total_issues_count,
+            "blocking_issues": self.blocking_issues_count,
+            "auto_fixable": len(self.get_auto_fixable_issues()),
+            "files_with_issues": len(set(issue.file_path for issue in self.all_issues))
+        }
+        
+        for severity in IssueSeverity:
+            stats[f"{severity.value}_count"] = len(self.get_issues_by_severity(severity))
+        
+        for issue_type in IssueType:
+            stats[f"{issue_type.value}_count"] = len(self.get_issues_by_type(issue_type))
+        
+        return stats
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "validation_id": self.validation_id,
+            "syntax_issues": [issue.to_dict() for issue in self.syntax_issues],
+            "architecture_issues": [issue.to_dict() for issue in self.architecture_issues],
+            "performance_issues": [issue.to_dict() for issue in self.performance_issues],
+            "style_issues": [issue.to_dict() for issue in self.style_issues],
+            "auto_fixed": self.auto_fixed,
+            "files_validated": self.files_validated,
+            "validation_passed": self.validation_passed,
+            "blocking_issues_count": self.blocking_issues_count,
+            "total_issues_count": self.total_issues_count,
+            "fix_suggestions": self.fix_suggestions,
+            "performance_metrics": self.performance_metrics,
+            "metadata": self.metadata,
+            "validated_at": self.validated_at.isoformat(),
+            "has_critical_issues": self.has_critical_issues(),
+            "summary_stats": self.get_summary_stats()
+        }
+
+
+@dataclass
+class FixResult:
+    """Result of fixing validation issues."""
+    fix_id: str
+    issues_fixed: List[str] = field(default_factory=list)  # issue IDs
+    changes_made: Dict[str, List[str]] = field(default_factory=dict)  # file -> changes
+    remaining_issues: List[ValidationIssue] = field(default_factory=list)
+    new_issues_introduced: List[ValidationIssue] = field(default_factory=list)
+    files_modified: List[str] = field(default_factory=list)
+    backup_paths: List[str] = field(default_factory=list)
+    success_rate: float = 0.0
+    overall_success: bool = False
+    fix_strategies_used: List[str] = field(default_factory=list)
+    performance_impact: Dict[str, Any] = field(default_factory=dict)
+    verification_results: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    fixed_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def __post_init__(self):
+        """Calculate derived fields after initialization."""
+        if self.issues_fixed and len(self.issues_fixed) > 0:
+            total_attempted = len(self.issues_fixed) + len(self.remaining_issues)
+            if total_attempted > 0:
+                self.success_rate = len(self.issues_fixed) / total_attempted
+        
+        self.overall_success = (
+            self.success_rate > 0.8 and 
+            len(self.new_issues_introduced) == 0 and
+            len(self.remaining_issues) == 0
+        )
+    
+    def get_fix_summary(self) -> Dict[str, int]:
+        """Get summary of fix results."""
+        return {
+            "issues_fixed": len(self.issues_fixed),
+            "issues_remaining": len(self.remaining_issues),
+            "new_issues": len(self.new_issues_introduced),
+            "files_modified": len(self.files_modified),
+            "changes_made": sum(len(changes) for changes in self.changes_made.values())
+        }
+    
+    def was_successful(self) -> bool:
+        """Check if fix operation was successful."""
+        return self.overall_success and len(self.new_issues_introduced) == 0
+    
+    def needs_manual_review(self) -> bool:
+        """Check if manual review is needed."""
+        return (
+            self.success_rate < 0.5 or 
+            len(self.new_issues_introduced) > 0 or
+            len(self.remaining_issues) > len(self.issues_fixed)
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "fix_id": self.fix_id,
+            "issues_fixed": self.issues_fixed,
+            "changes_made": self.changes_made,
+            "remaining_issues": [issue.to_dict() for issue in self.remaining_issues],
+            "new_issues_introduced": [issue.to_dict() for issue in self.new_issues_introduced],
+            "files_modified": self.files_modified,
+            "backup_paths": self.backup_paths,
+            "success_rate": self.success_rate,
+            "overall_success": self.overall_success,
+            "fix_strategies_used": self.fix_strategies_used,
+            "performance_impact": self.performance_impact,
+            "verification_results": self.verification_results,
+            "metadata": self.metadata,
+            "fixed_at": self.fixed_at.isoformat(),
+            "fix_summary": self.get_fix_summary(),
+            "was_successful": self.was_successful(),
+            "needs_manual_review": self.needs_manual_review()
         }

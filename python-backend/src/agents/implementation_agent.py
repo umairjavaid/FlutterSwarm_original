@@ -28,7 +28,9 @@ from ..models.code_models import (
     GenerationEntry, CodePattern, ProjectStructure, CodeType, ArchitectureStyle,
     CodeConvention, CodeAnalysisResult, CodeExample, IntegrationPlan,
     GeneratedCode, PlacementResult, UpdateResult, RefactoringRequest,
-    RefactoringResult, ImpactAnalysis, MovementPlan, RefactoringType, RiskLevel
+    RefactoringResult, ImpactAnalysis, MovementPlan, RefactoringType, RiskLevel,
+    CodeChanges, ValidationResult, ValidationIssue, FixResult, SyntaxIssue,
+    ArchitectureIssue, PerformanceIssue, StyleFixResult, IssueType, IssueSeverity
 )
 from ..models.tool_models import ToolUsagePlan, ToolOperation, TaskOutcome, ToolStatus
 from ..config import get_logger
@@ -4113,3 +4115,2048 @@ Provide complete, production-ready Flutter UI code with proper documentation.
         except Exception as e:
             logger.error(f"Refactoring rollback failed: {e}")
             return False
+
+    # Continuous Code Validation and Intelligent Issue Resolution
+    
+    async def _check_syntax_and_types(self, file_path: str) -> List[SyntaxIssue]:
+        """
+        Check Dart syntax and type issues using analysis tools.
+        
+        Args:
+            file_path: Path to the Dart file to analyze
+            
+        Returns:
+            List[SyntaxIssue]: List of syntax and type issues found
+        """
+        try:
+            logger.info(f"Checking syntax and types for: {file_path}")
+            
+            syntax_issues = []
+            
+            # Ensure tools are available
+            if not self.process_tool:
+                await self.initialize_tools()
+            
+            # Step 1: Use dart analyze for comprehensive analysis
+            analyze_result = await self.use_tool(
+                "process",
+                "run_command",
+                {
+                    "command": f"dart analyze '{file_path}' --format=json",
+                    "timeout": 60000  # 1 minute timeout
+                },
+                f"Running dart analyze on {file_path}"
+            )
+            
+            if analyze_result.status == ToolStatus.SUCCESS:
+                output = analyze_result.data.get("output", "")
+                syntax_issues.extend(self._parse_dart_analyze_output(output, file_path))
+            else:
+                logger.warning(f"Dart analyze failed for {file_path}: {analyze_result.error_message}")
+            
+            # Step 2: Use flutter analyze for Flutter-specific checks
+            flutter_analyze_result = await self.use_tool(
+                "process", 
+                "run_command",
+                {
+                    "command": f"flutter analyze '{file_path}'",
+                    "timeout": 60000
+                },
+                f"Running flutter analyze on {file_path}"
+            )
+            
+            if flutter_analyze_result.status == ToolStatus.SUCCESS:
+                flutter_output = flutter_analyze_result.data.get("output", "")
+                syntax_issues.extend(self._parse_flutter_analyze_output(flutter_output, file_path))
+            
+            # Step 3: Basic syntax validation using our own parser
+            read_result = await self.use_tool(
+                "file_system",
+                "read_file",
+                {"file_path": file_path},
+                f"Reading file for syntax analysis: {file_path}"
+            )
+            
+            if read_result.status == ToolStatus.SUCCESS:
+                content = read_result.data.get("content", "")
+                syntax_issues.extend(self._basic_syntax_check(content, file_path))
+            
+            logger.info(f"Found {len(syntax_issues)} syntax/type issues in {file_path}")
+            return syntax_issues
+            
+        except Exception as e:
+            logger.error(f"Error checking syntax and types for {file_path}: {e}")
+            return []
+
+    def _parse_dart_analyze_output(self, output: str, file_path: str) -> List[SyntaxIssue]:
+        """Parse dart analyze JSON output into SyntaxIssue objects."""
+        syntax_issues = []
+        
+        try:
+            import json
+            
+            # Try to parse as JSON
+            if output.strip().startswith('{') or output.strip().startswith('['):
+                try:
+                    data = json.loads(output)
+                    
+                    # Handle different output formats
+                    if isinstance(data, dict) and "diagnostics" in data:
+                        diagnostics = data["diagnostics"]
+                    elif isinstance(data, list):
+                        diagnostics = data
+                    else:
+                        diagnostics = []
+                    
+                    for diagnostic in diagnostics:
+                        if diagnostic.get("file") == file_path:
+                            issue = SyntaxIssue(
+                                error_type=diagnostic.get("type", "unknown"),
+                                message=diagnostic.get("message", ""),
+                                line=diagnostic.get("line", 0),
+                                column=diagnostic.get("column", 0),
+                                context=diagnostic.get("context", ""),
+                                expected=diagnostic.get("expected"),
+                                actual=diagnostic.get("actual")
+                            )
+                            syntax_issues.append(issue)
+                            
+                except json.JSONDecodeError:
+                    # Fall back to text parsing
+                    syntax_issues.extend(self._parse_analyze_text_output(output, file_path))
+            else:
+                # Parse text output
+                syntax_issues.extend(self._parse_analyze_text_output(output, file_path))
+                
+        except Exception as e:
+            logger.warning(f"Error parsing dart analyze output: {e}")
+        
+        return syntax_issues
+
+    def _parse_flutter_analyze_output(self, output: str, file_path: str) -> List[SyntaxIssue]:
+        """Parse flutter analyze output into SyntaxIssue objects."""
+        syntax_issues = []
+        
+        try:
+            lines = output.split('\n')
+            for line in lines:
+                line = line.strip()
+                if file_path in line and ('error' in line.lower() or 'warning' in line.lower()):
+                    # Parse line format: file:line:column: type: message
+                    parts = line.split(':')
+                    if len(parts) >= 4:
+                        try:
+                            line_num = int(parts[1]) if parts[1].isdigit() else 0
+                            col_num = int(parts[2]) if parts[2].isdigit() else 0
+                            error_type = parts[3].strip()
+                            message = ':'.join(parts[4:]).strip()
+                            
+                            issue = SyntaxIssue(
+                                error_type=error_type,
+                                message=message,
+                                line=line_num,
+                                column=col_num,
+                                context=line
+                            )
+                            syntax_issues.append(issue)
+                            
+                        except (ValueError, IndexError):
+                            # Skip malformed lines
+                            continue
+                            
+        except Exception as e:
+            logger.warning(f"Error parsing flutter analyze output: {e}")
+        
+        return syntax_issues
+
+    def _parse_analyze_text_output(self, output: str, file_path: str) -> List[SyntaxIssue]:
+        """Parse text-based analyze output."""
+        syntax_issues = []
+        
+        try:
+            lines = output.split('\n')
+            for line in lines:
+                line = line.strip()
+                if file_path in line:
+                    # Try to extract line and column numbers
+                    import re
+                    match = re.search(r'(\d+):(\d+)', line)
+                    line_num = int(match.group(1)) if match else 0
+                    col_num = int(match.group(2)) if match else 0
+                    
+                    # Determine error type
+                    error_type = "error" if "error" in line.lower() else "warning"
+                    
+                    issue = SyntaxIssue(
+                        error_type=error_type,
+                        message=line,
+                        line=line_num,
+                        column=col_num,
+                        context=line
+                    )
+                    syntax_issues.append(issue)
+                    
+        except Exception as e:
+            logger.warning(f"Error parsing analyze text output: {e}")
+        
+        return syntax_issues
+
+    def _basic_syntax_check(self, content: str, file_path: str) -> List[SyntaxIssue]:
+        """Perform basic syntax checking on Dart code."""
+        syntax_issues = []
+        
+        try:
+            lines = content.split('\n')
+            
+            # Check for basic syntax issues
+            brace_count = 0
+            paren_count = 0
+            bracket_count = 0
+            
+            for i, line in enumerate(lines, 1):
+                line = line.strip()
+                
+                # Count braces, parentheses, brackets
+                brace_count += line.count('{') - line.count('}')
+                paren_count += line.count('(') - line.count(')')
+                bracket_count += line.count('[') - line.count(']')
+                
+                # Check for common syntax errors
+                if line and not line.endswith(';') and not line.endswith('{') and not line.endswith('}') and not line.startswith('//'):
+                    # Check if it looks like a statement that should end with semicolon
+                    if any(keyword in line for keyword in ['return', 'print', 'var ', 'final ', 'const ']):
+                        issue = SyntaxIssue(
+                            error_type="missing_semicolon",
+                            message="Statement may be missing semicolon",
+                            line=i,
+                            column=len(line),
+                            context=line
+                        )
+                        syntax_issues.append(issue)
+            
+            # Check for unmatched braces
+            if brace_count != 0:
+                issue = SyntaxIssue(
+                    error_type="unmatched_braces",
+                    message=f"Unmatched braces: {brace_count} extra {'opening' if brace_count > 0 else 'closing'}",
+                    line=len(lines),
+                    column=0,
+                    context="EOF"
+                )
+                syntax_issues.append(issue)
+            
+            # Check for unmatched parentheses
+            if paren_count != 0:
+                issue = SyntaxIssue(
+                    error_type="unmatched_parentheses",
+                    message=f"Unmatched parentheses: {paren_count} extra {'opening' if paren_count > 0 else 'closing'}",
+                    line=len(lines),
+                    column=0,
+                    context="EOF"
+                )
+                syntax_issues.append(issue)
+            
+            # Check for unmatched brackets
+            if bracket_count != 0:
+                issue = SyntaxIssue(
+                    error_type="unmatched_brackets",
+                    message=f"Unmatched brackets: {bracket_count} extra {'opening' if bracket_count > 0 else 'closing'}",
+                    line=len(lines),
+                    column=0,
+                    context="EOF"
+                )
+                syntax_issues.append(issue)
+                
+        except Exception as e:
+            logger.warning(f"Error in basic syntax check: {e}")
+        
+        return syntax_issues
+
+    async def _validate_architecture_compliance(self, file_path: str, project_context: CodeProjectContext) -> List[ArchitectureIssue]:
+        """
+        Validate architecture compliance and pattern adherence.
+        
+        Args:
+            file_path: Path to the file to validate
+            project_context: Project context with architecture information
+            
+        Returns:
+            List[ArchitectureIssue]: List of architecture compliance issues
+        """
+        try:
+            logger.info(f"Validating architecture compliance for: {file_path}")
+            
+            issues = []
+            
+            # Read file content
+            read_result = await self.use_tool(
+                "file_system",
+                "read_file", 
+                {"file_path": file_path},
+                f"Reading file for architecture validation: {file_path}"
+            )
+            
+            if read_result.status != ToolStatus.SUCCESS:
+                return issues
+            
+            content = read_result.data.get("content", "")
+            
+            # Step 1: Check file placement according to architecture
+            placement_issues = self._check_file_placement(file_path, content, project_context)
+            issues.extend(placement_issues)
+            
+            # Step 2: Check naming conventions
+            naming_issues = self._check_naming_conventions(file_path, content, project_context)
+            issues.extend(naming_issues)
+            
+            # Step 3: Check dependency patterns
+            dependency_issues = self._check_dependency_patterns(file_path, content, project_context)
+            issues.extend(dependency_issues)
+            
+            # Step 4: Check layer violations
+            layer_issues = self._check_layer_violations(file_path, content, project_context)
+            issues.extend(layer_issues)
+            
+            # Step 5: Check pattern adherence
+            pattern_issues = self._check_pattern_adherence(file_path, content, project_context)
+            issues.extend(pattern_issues)
+            
+            logger.info(f"Found {len(issues)} architecture issues in {file_path}")
+            return issues
+            
+        except Exception as e:
+            logger.error(f"Error validating architecture compliance for {file_path}: {e}")
+            return []
+
+    def _check_file_placement(self, file_path: str, content: str, project_context: CodeProjectContext) -> List[ArchitectureIssue]:
+        """Check if file is placed in the correct directory according to architecture."""
+        issues = []
+        
+        try:
+            # Determine expected location based on file content
+            code_type = self._detect_code_type(file_path, content)
+            
+            if code_type and project_context.structure:
+                expected_location = project_context.structure.suggest_file_location(code_type, "")
+                actual_directory = str(Path(file_path).parent)
+                
+                if expected_location and expected_location not in actual_directory:
+                    issue = ArchitectureIssue(
+                        violation_type="incorrect_file_placement",
+                        pattern_expected=f"Files of type {code_type.value} should be in {expected_location}",
+                        pattern_found=f"File found in {actual_directory}",
+                        recommendation=f"Move file to {expected_location} directory",
+                        impact_level="medium"
+                    )
+                    issues.append(issue)
+                    
+        except Exception as e:
+            logger.warning(f"Error checking file placement: {e}")
+        
+        return issues
+
+    def _check_naming_conventions(self, file_path: str, content: str, project_context: CodeProjectContext) -> List[ArchitectureIssue]:
+        """Check naming convention compliance."""
+        issues = []
+        
+        try:
+            import re
+            
+            # Check file name convention
+            file_name = Path(file_path).stem
+            if not re.match(r'^[a-z][a-z0-9_]*$', file_name):
+                issue = ArchitectureIssue(
+                    violation_type="file_naming_convention",
+                    pattern_expected="snake_case file names",
+                    pattern_found=f"File name: {file_name}",
+                    recommendation="Use snake_case for file names",
+                    impact_level="low"
+                )
+                issues.append(issue)
+            
+            # Check class name conventions
+            class_matches = re.findall(r'class\s+(\w+)', content)
+            for class_name in class_matches:
+                if not re.match(r'^[A-Z][a-zA-Z0-9]*$', class_name):
+                    issue = ArchitectureIssue(
+                        violation_type="class_naming_convention",
+                        pattern_expected="PascalCase class names",
+                        pattern_found=f"Class name: {class_name}",
+                        recommendation="Use PascalCase for class names",
+                        impact_level="medium"
+                    )
+                    issues.append(issue)
+            
+            # Check variable naming conventions
+            var_matches = re.findall(r'(?:var|final|const)\s+(\w+)', content)
+            for var_name in var_matches:
+                if not re.match(r'^[a-z][a-zA-Z0-9]*$', var_name):
+                    issue = ArchitectureIssue(
+                        violation_type="variable_naming_convention",
+                        pattern_expected="camelCase variable names",
+                        pattern_found=f"Variable name: {var_name}",
+                        recommendation="Use camelCase for variable names",
+                        impact_level="low"
+                    )
+                    issues.append(issue)
+                    
+        except Exception as e:
+            logger.warning(f"Error checking naming conventions: {e}")
+        
+        return issues
+
+    def _check_dependency_patterns(self, file_path: str, content: str, project_context: CodeProjectContext) -> List[ArchitectureIssue]:
+        """Check dependency import patterns."""
+        issues = []
+        
+        try:
+            import re
+            
+            # Extract imports
+            import_matches = re.findall(r"import\s+['\"]([^'\"]+)['\"]", content)
+            
+            # Check for circular dependencies (simplified)
+            current_module = str(Path(file_path).parent).replace('/', '.')
+            for import_path in import_matches:
+                if import_path.startswith('./') or import_path.startswith('../'):
+                    # Check if this could create a circular dependency
+                    if current_module in import_path:
+                        issue = ArchitectureIssue(
+                            violation_type="potential_circular_dependency",
+                            pattern_expected="Avoid circular dependencies",
+                            pattern_found=f"Import: {import_path}",
+                            recommendation="Restructure to avoid circular dependencies",
+                            impact_level="high"
+                        )
+                        issues.append(issue)
+            
+            # Check import organization
+            dart_imports = [imp for imp in import_matches if imp.startswith('dart:')]
+            package_imports = [imp for imp in import_matches if imp.startswith('package:')]
+            relative_imports = [imp for imp in import_matches if not imp.startswith('dart:') and not imp.startswith('package:')]
+            
+            # Imports should be organized: dart: first, then package:, then relative
+            all_imports = dart_imports + package_imports + relative_imports
+            if import_matches != all_imports:
+                issue = ArchitectureIssue(
+                    violation_type="import_organization",
+                    pattern_expected="Organize imports: dart:, package:, relative",
+                    pattern_found="Imports are not properly organized",
+                    recommendation="Reorder imports according to Dart style guide",
+                    impact_level="low"
+                )
+                issues.append(issue)
+                
+        except Exception as e:
+            logger.warning(f"Error checking dependency patterns: {e}")
+        
+        return issues
+
+    def _check_layer_violations(self, file_path: str, content: str, project_context: CodeProjectContext) -> List[ArchitectureIssue]:
+        """Check for architecture layer violations."""
+        issues = []
+        
+        try:
+            if not project_context.structure:
+                return issues
+            
+            # Determine current layer
+            current_layer = project_context.structure.get_layer_for_path(file_path)
+            
+            if current_layer:
+                # Check imports to see if they violate layer boundaries
+                import re
+                import_matches = re.findall(r"import\s+['\"]([^'\"]+)['\"]", content)
+                
+                for import_path in import_matches:
+                    if not import_path.startswith('dart:') and not import_path.startswith('package:'):
+                        # Check if this import violates layer boundaries
+                        if self._violates_layer_boundary(current_layer, import_path, project_context):
+                            issue = ArchitectureIssue(
+                                violation_type="layer_boundary_violation",
+                                pattern_expected=f"{current_layer} layer should not import from higher layers",
+                                pattern_found=f"Import: {import_path}",
+                                recommendation="Restructure dependencies to respect layer boundaries",
+                                impact_level="high"
+                            )
+                            issues.append(issue)
+                            
+        except Exception as e:
+            logger.warning(f"Error checking layer violations: {e}")
+        
+        return issues
+
+    def _violates_layer_boundary(self, current_layer: str, import_path: str, project_context: CodeProjectContext) -> bool:
+        """Check if an import violates architecture layer boundaries."""
+        try:
+            # Define layer hierarchy (lower layers can import from higher layers)
+            layer_hierarchy = {
+                "presentation": 0,  # Lowest layer
+                "domain": 1,       # Middle layer  
+                "data": 2          # Highest layer
+            }
+            
+            current_level = layer_hierarchy.get(current_layer, 0)
+            
+            # Try to determine the layer of the imported file
+            for layer, paths in project_context.structure.architecture_layers.items():
+                if any(import_path in path for path in paths):
+                    import_level = layer_hierarchy.get(layer, 0)
+                    # Violation if importing from a lower layer
+                    return import_level < current_level
+            
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Error checking layer boundary violation: {e}")
+            return False
+
+    def _check_pattern_adherence(self, file_path: str, content: str, project_context: CodeProjectContext) -> List[ArchitectureIssue]:
+        """Check adherence to established patterns."""
+        issues = []
+        
+        try:
+            # Check for established patterns in the project
+            for pattern_id, pattern in project_context.existing_patterns.items():
+                if pattern.pattern_type == "state_management":
+                    # Check if file follows state management pattern
+                    if self._should_follow_pattern(file_path, content, pattern):
+                        if not self._follows_pattern(content, pattern):
+                            issue = ArchitectureIssue(
+                                violation_type="pattern_adherence",
+                                pattern_expected=pattern.description,
+                                pattern_found="Code does not follow established pattern",
+                                recommendation=f"Follow {pattern.pattern_type} pattern as established in project",
+                                impact_level="medium"
+                            )
+                            issues.append(issue)
+                            
+        except Exception as e:
+            logger.warning(f"Error checking pattern adherence: {e}")
+        
+        return issues
+
+    def _should_follow_pattern(self, file_path: str, content: str, pattern: CodePattern) -> bool:
+        """Determine if a file should follow a specific pattern."""
+        # Check if file type matches pattern requirements
+        if "bloc" in pattern.pattern_type.lower() and ("bloc" in content.lower() or "cubit" in content.lower()):
+            return True
+        if "widget" in pattern.pattern_type.lower() and "widget" in content.lower():
+            return True
+        return False
+
+    def _follows_pattern(self, content: str, pattern: CodePattern) -> bool:
+        """Check if content follows the specified pattern."""
+        # Simplified pattern checking - in practice this would be more sophisticated
+        for example in pattern.examples:
+            if example in content:
+                return True
+        return False
+
+    async def _check_performance_issues(self, file_path: str) -> List[PerformanceIssue]:
+        """
+        Check for performance issues in Dart/Flutter code.
+        
+        Args:
+            file_path: Path to the file to analyze
+            
+        Returns:
+            List[PerformanceIssue]: List of performance issues found
+        """
+        try:
+            logger.info(f"Checking performance issues for: {file_path}")
+            
+            performance_issues = []
+            
+            # Read file content
+            read_result = await self.use_tool(
+                "file_system",
+                "read_file",
+                {"file_path": file_path},
+                f"Reading file for performance analysis: {file_path}"
+            )
+            
+            if read_result.status != ToolStatus.SUCCESS:
+                return performance_issues
+            
+            content = read_result.data.get("content", "")
+            
+            # Check for performance anti-patterns
+            performance_issues.extend(self._check_widget_performance(content, file_path))
+            performance_issues.extend(self._check_build_method_issues(content, file_path))
+            performance_issues.extend(self._check_memory_leaks(content, file_path))
+            performance_issues.extend(self._check_inefficient_operations(content, file_path))
+            performance_issues.extend(self._check_blocking_operations(content, file_path))
+            
+            logger.info(f"Found {len(performance_issues)} performance issues in {file_path}")
+            return performance_issues
+            
+        except Exception as e:
+            logger.error(f"Error checking performance issues for {file_path}: {e}")
+            return []
+
+    def _check_widget_performance(self, content: str, file_path: str) -> List[PerformanceIssue]:
+        """Check for widget-specific performance issues."""
+        issues = []
+        
+        try:
+            import re
+            lines = content.split('\n')
+            
+            for i, line in enumerate(lines, 1):
+                line = line.strip()
+                
+                # Check for StatefulWidget with simple state
+                if "StatefulWidget" in line and "class" in line and i < len(lines) - 10:
+                    # Look ahead for simple state management
+                    state_lines = lines[i:i+10]
+                    state_content = '\n'.join(state_lines)
+                    if "setState" not in state_content and "build" in state_content:
+                        issue = PerformanceIssue(
+                            issue_type="unnecessary_stateful_widget",
+                            description="StatefulWidget used without state management",
+                            location={"line": i, "column": 0},
+                            impact="Widget rebuilds unnecessarily",
+                            suggestion="Consider using StatelessWidget instead",
+                            severity="medium"
+                        )
+                        issues.append(issue)
+                
+                # Check for missing const constructors
+                if "Widget" in line and "const" not in line and ("(" in line and ")" in line):
+                    issue = PerformanceIssue(
+                        issue_type="missing_const_constructor",
+                        description="Widget missing const constructor",
+                        location={"line": i, "column": 0},
+                        impact="Prevents widget optimization",
+                        suggestion="Add const constructor where possible",
+                        severity="low"
+                    )
+                    issues.append(issue)
+                
+                # Check for expensive operations in build method
+                if "build(" in line and i < len(lines) - 20:
+                    build_lines = lines[i:i+20]
+                    build_content = '\n'.join(build_lines)
+                    
+                    if "DateTime.now()" in build_content:
+                        issue = PerformanceIssue(
+                            issue_type="expensive_build_operation",
+                            description="DateTime.now() called in build method",
+                            location={"line": i, "column": 0},
+                            impact="Causes unnecessary rebuilds",
+                            suggestion="Move DateTime.now() outside build method or use cached value",
+                            severity="high"
+                        )
+                        issues.append(issue)
+                    
+                    if "Random(" in build_content:
+                        issue = PerformanceIssue(
+                            issue_type="expensive_build_operation",
+                            description="Random object created in build method",
+                            location={"line": i, "column": 0},
+                            impact="Creates objects on every rebuild",
+                            suggestion="Create Random object outside build method",
+                            severity="medium"
+                        )
+                        issues.append(issue)
+                        
+        except Exception as e:
+            logger.warning(f"Error checking widget performance: {e}")
+        
+        return issues
+
+    def _check_build_method_issues(self, content: str, file_path: str) -> List[PerformanceIssue]:
+        """Check for build method performance issues."""
+        issues = []
+        
+        try:
+            import re
+            lines = content.split('\n')
+            
+            for i, line in enumerate(lines, 1):
+                line = line.strip()
+                
+                # Check for complex build methods
+                if "Widget build(" in line or "@override" in line and i < len(lines) - 1 and "build(" in lines[i]:
+                    # Count lines in build method
+                    brace_count = 0
+                    build_lines = 0
+                    start_counting = False
+                    
+                    for j in range(i, min(i + 100, len(lines))):
+                        build_line = lines[j].strip()
+                        if "{" in build_line:
+                            brace_count += build_line.count("{")
+                            start_counting = True
+                        if "}" in build_line:
+                            brace_count -= build_line.count("}")
+                        if start_counting:
+                            build_lines += 1
+                        if start_counting and brace_count == 0:
+                            break
+                    
+                    if build_lines > 50:
+                        issue = PerformanceIssue(
+                            issue_type="complex_build_method",
+                            description=f"Build method is too complex ({build_lines} lines)",
+                            location={"line": i, "column": 0},
+                            impact="Difficult to optimize and maintain",
+                            suggestion="Break down build method into smaller widgets",
+                            severity="medium"
+                        )
+                        issues.append(issue)
+                
+                # Check for nested ListView/GridView
+                if ("ListView(" in line or "GridView(" in line) and i < len(lines) - 10:
+                    check_lines = lines[i:i+10]
+                    check_content = '\n'.join(check_lines)
+                    if "ListView(" in check_content or "GridView(" in check_content:
+                        issue = PerformanceIssue(
+                            issue_type="nested_scrollable_widgets",
+                            description="Nested scrollable widgets detected",
+                            location={"line": i, "column": 0},
+                            impact="Can cause rendering issues and poor performance",
+                            suggestion="Use CustomScrollView with Slivers or avoid nesting",
+                            severity="high"
+                        )
+                        issues.append(issue)
+                        
+        except Exception as e:
+            logger.warning(f"Error checking build method issues: {e}")
+        
+        return issues
+
+    def _check_memory_leaks(self, content: str, file_path: str) -> List[PerformanceIssue]:
+        """Check for potential memory leaks."""
+        issues = []
+        
+        try:
+            import re
+            lines = content.split('\n')
+            
+            # Check for StreamController without dispose
+            has_stream_controller = False
+            has_dispose_method = False
+            stream_controller_line = 0
+            
+            for i, line in enumerate(lines, 1):
+                line = line.strip()
+                
+                if "StreamController" in line and "=" in line:
+                    has_stream_controller = True
+                    stream_controller_line = i
+                
+                if "dispose()" in line or "@override" in line and i < len(lines) - 1 and "dispose()" in lines[i]:
+                    has_dispose_method = True
+            
+            if has_stream_controller and not has_dispose_method:
+                issue = PerformanceIssue(
+                    issue_type="potential_memory_leak",
+                    description="StreamController not disposed properly",
+                    location={"line": stream_controller_line, "column": 0},
+                    impact="Can cause memory leaks",
+                    suggestion="Add dispose() method and call controller.close()",
+                    severity="high"
+                )
+                issues.append(issue)
+            
+            # Check for Timer without cancel
+            has_timer = False
+            has_timer_cancel = False
+            timer_line = 0
+            
+            for i, line in enumerate(lines, 1):
+                line = line.strip()
+                
+                if "Timer(" in line or "Timer.periodic(" in line:
+                    has_timer = True
+                    timer_line = i
+                
+                if "cancel()" in line:
+                    has_timer_cancel = True
+            
+            if has_timer and not has_timer_cancel:
+                issue = PerformanceIssue(
+                    issue_type="potential_memory_leak",
+                    description="Timer not cancelled properly",
+                    location={"line": timer_line, "column": 0},
+                    impact="Timer continues running after widget disposal",
+                    suggestion="Cancel timer in dispose() method",
+                    severity="medium"
+                )
+                issues.append(issue)
+                
+        except Exception as e:
+            logger.warning(f"Error checking memory leaks: {e}")
+        
+        return issues
+
+    def _check_inefficient_operations(self, content: str, file_path: str) -> List[PerformanceIssue]:
+        """Check for inefficient operations."""
+        issues = []
+        
+        try:
+            import re
+            lines = content.split('\n')
+            
+            for i, line in enumerate(lines, 1):
+                line = line.strip()
+                
+                # Check for inefficient list operations
+                if ".where(" in line and ".toList()" in line:
+                    issue = PerformanceIssue(
+                        issue_type="inefficient_list_operation",
+                        description="Chained where().toList() operations",
+                        location={"line": i, "column": 0},
+                        impact="Creates intermediate collections",
+                        suggestion="Consider using whereType() or single operation",
+                        severity="low"
+                    )
+                    issues.append(issue)
+                
+                # Check for string concatenation in loops
+                if ("for(" in line or "for " in line) and i < len(lines) - 5:
+                    loop_content = '\n'.join(lines[i:i+5])
+                    if "+=" in loop_content and "String" in loop_content:
+                        issue = PerformanceIssue(
+                            issue_type="inefficient_string_operations",
+                            description="String concatenation in loop",
+                            location={"line": i, "column": 0},
+                            impact="O(n²) time complexity for string building",
+                            suggestion="Use StringBuffer for efficient string building",
+                            severity="medium"
+                        )
+                        issues.append(issue)
+                
+                # Check for unnecessary async/await
+                if "await" in line and "return" in line and not "Future" in line:
+                    issue = PerformanceIssue(
+                        issue_type="unnecessary_async_await",
+                        description="Unnecessary await in return statement",
+                        location={"line": i, "column": 0},
+                        impact="Adds unnecessary microtask overhead",
+                        suggestion="Return Future directly without await",
+                        severity="low"
+                    )
+                    issues.append(issue)
+                    
+        except Exception as e:
+            logger.warning(f"Error checking inefficient operations: {e}")
+        
+        return issues
+
+    def _check_blocking_operations(self, content: str, file_path: str) -> List[PerformanceIssue]:
+        """Check for blocking operations that should be async."""
+        issues = []
+        
+        try:
+            import re
+            lines = content.split('\n')
+            
+            for i, line in enumerate(lines, 1):
+                line = line.strip()
+                
+                # Check for synchronous file operations
+                if "File(" in line and ("readAsString()" in line or "writeAsString(" in line):
+                    issue = PerformanceIssue(
+                        issue_type="blocking_io_operation",
+                        description="Synchronous file I/O operation",
+                        location={"line": i, "column": 0},
+                        impact="Blocks UI thread",
+                        suggestion="Use async file operations (readAsString, writeAsString)",
+                        severity="high"
+                    )
+                    issues.append(issue)
+                
+                # Check for synchronous HTTP requests
+                if "http.get(" in line and "await" not in line:
+                    issue = PerformanceIssue(
+                        issue_type="blocking_network_operation",
+                        description="Synchronous HTTP request",
+                        location={"line": i, "column": 0},
+                        impact="Blocks UI thread during network call",
+                        suggestion="Use await with HTTP requests",
+                        severity="high"
+                    )
+                    issues.append(issue)
+                
+                # Check for heavy computation in UI thread
+                if "build(" in line and i < len(lines) - 10:
+                    build_content = '\n'.join(lines[i:i+10])
+                    if "for(" in build_content and ("calculate" in build_content or "compute" in build_content):
+                        issue = PerformanceIssue(
+                            issue_type="heavy_computation_in_ui_thread",
+                            description="Heavy computation in build method",
+                            location={"line": i, "column": 0},
+                            impact="Blocks UI rendering",
+                            suggestion="Move computation to isolate or cache results",
+                            severity="high"
+                        )
+                        issues.append(issue)
+                        
+        except Exception as e:
+            logger.warning(f"Error checking blocking operations: {e}")
+        
+        return issues
+
+    async def _apply_style_fixes(self, file_path: str) -> StyleFixResult:
+        """
+        Apply automatic style fixes to Dart/Flutter code.
+        
+        Args:
+            file_path: Path to the file to fix
+            
+        Returns:
+            StyleFixResult: Result of style fixing operation
+        """
+        try:
+            logger.info(f"Applying style fixes for: {file_path}")
+            
+            # Read original content
+            read_result = await self.use_tool(
+                "file_system",
+                "read_file",
+                {"file_path": file_path},
+                f"Reading file for style fixing: {file_path}"
+            )
+            
+            if read_result.status != ToolStatus.SUCCESS:
+                return StyleFixResult(
+                    success=False,
+                    fixes_applied=[],
+                    errors=[f"Failed to read file: {read_result.error_message}"]
+                )
+            
+            original_content = read_result.data.get("content", "")
+            fixed_content = original_content
+            fixes_applied = []
+            errors = []
+            
+            # Apply various style fixes
+            fixed_content, import_fixes = self._fix_import_organization(fixed_content, file_path)
+            fixes_applied.extend(import_fixes)
+            
+            fixed_content, spacing_fixes = self._fix_spacing_issues(fixed_content, file_path)
+            fixes_applied.extend(spacing_fixes)
+            
+            fixed_content, naming_fixes = self._fix_naming_conventions(fixed_content, file_path)
+            fixes_applied.extend(naming_fixes)
+            
+            fixed_content, const_fixes = self._add_missing_const(fixed_content, file_path)
+            fixes_applied.extend(const_fixes)
+            
+            fixed_content, formatting_fixes = self._fix_formatting_issues(fixed_content, file_path)
+            fixes_applied.extend(formatting_fixes)
+            
+            # Apply dart format if available
+            if fixed_content != original_content:
+                format_result = await self._apply_dart_format(file_path, fixed_content)
+                if format_result.get("success", False):
+                    fixed_content = format_result.get("formatted_content", fixed_content)
+                    fixes_applied.append("Applied dart format")
+                else:
+                    errors.append(f"Dart format failed: {format_result.get('error', 'Unknown error')}")
+            
+            # Write fixed content if changes were made
+            if fixed_content != original_content:
+                write_result = await self.use_tool(
+                    "file_system",
+                    "write_file",
+                    {
+                        "file_path": file_path,
+                        "content": fixed_content
+                    },
+                    f"Writing style-fixed content to: {file_path}"
+                )
+                
+                if write_result.status != ToolStatus.SUCCESS:
+                    errors.append(f"Failed to write fixed content: {write_result.error_message}")
+            
+            result = StyleFixResult(
+                success=len(errors) == 0,
+                fixes_applied=fixes_applied,
+                errors=errors,
+                changes_made=fixed_content != original_content,
+                original_content=original_content,
+                fixed_content=fixed_content if fixed_content != original_content else None
+            )
+            
+            logger.info(f"Applied {len(fixes_applied)} style fixes to {file_path}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error applying style fixes for {file_path}: {e}")
+            return StyleFixResult(
+                success=False,
+                fixes_applied=[],
+                errors=[str(e)]
+            )
+
+    def _fix_import_organization(self, content: str, file_path: str) -> Tuple[str, List[str]]:
+        """Fix import organization according to Dart style guide."""
+        fixes_applied = []
+        
+        try:
+            lines = content.split('\n')
+            import_lines = []
+            other_lines = []
+            dart_imports = []
+            package_imports = []
+            relative_imports = []
+            
+            # Separate imports from other code
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith('import '):
+                    import_lines.append(line)
+                    
+                    # Categorize imports
+                    if 'dart:' in stripped:
+                        dart_imports.append(line)
+                    elif 'package:' in stripped:
+                        package_imports.append(line)
+                    else:
+                        relative_imports.append(line)
+                else:
+                    other_lines.append(line)
+            
+            # Check if reorganization is needed
+            expected_order = dart_imports + package_imports + relative_imports
+            if import_lines != expected_order:
+                # Reorganize imports
+                organized_imports = []
+                
+                if dart_imports:
+                    organized_imports.extend(sorted(dart_imports))
+                    
+                if package_imports:
+                    if dart_imports:
+                        organized_imports.append('')  # Empty line between categories
+                    organized_imports.extend(sorted(package_imports))
+                    
+                if relative_imports:
+                    if dart_imports or package_imports:
+                        organized_imports.append('')  # Empty line between categories
+                    organized_imports.extend(sorted(relative_imports))
+                
+                # Reconstruct content
+                if organized_imports:
+                    organized_imports.append('')  # Empty line after imports
+                
+                reorganized_content = '\n'.join(organized_imports + other_lines)
+                fixes_applied.append("Reorganized imports according to Dart style guide")
+                return reorganized_content, fixes_applied
+                
+        except Exception as e:
+            logger.warning(f"Error fixing import organization: {e}")
+        
+        return content, fixes_applied
+
+    def _fix_spacing_issues(self, content: str, file_path: str) -> Tuple[str, List[str]]:
+        """Fix spacing and indentation issues."""
+        fixes_applied = []
+        
+        try:
+            import re
+            
+            # Fix multiple empty lines
+            fixed_content = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)
+            if fixed_content != content:
+                fixes_applied.append("Removed excessive empty lines")
+                content = fixed_content
+            
+            # Fix trailing whitespace
+            lines = content.split('\n')
+            fixed_lines = []
+            trailing_whitespace_fixed = False
+            
+            for line in lines:
+                fixed_line = line.rstrip()
+                if fixed_line != line:
+                    trailing_whitespace_fixed = True
+                fixed_lines.append(fixed_line)
+            
+            if trailing_whitespace_fixed:
+                fixes_applied.append("Removed trailing whitespace")
+                content = '\n'.join(fixed_lines)
+            
+            # Fix spacing around operators
+            operator_fixes = []
+            operators = ['=', '+', '-', '*', '/', '%', '==', '!=', '<', '>', '<=', '>=', '&&', '||']
+            
+            for op in operators:
+                # Add spaces around operators (but not in strings)
+                pattern = rf'(\w){re.escape(op)}(\w)'
+                replacement = rf'\1 {op} \2'
+                new_content = re.sub(pattern, replacement, content)
+                if new_content != content:
+                    operator_fixes.append(op)
+                    content = new_content
+            
+            if operator_fixes:
+                fixes_applied.append(f"Fixed spacing around operators: {', '.join(operator_fixes)}")
+                
+        except Exception as e:
+            logger.warning(f"Error fixing spacing issues: {e}")
+        
+        return content, fixes_applied
+
+    def _fix_naming_conventions(self, content: str, file_path: str) -> Tuple[str, List[str]]:
+        """Fix naming convention issues."""
+        fixes_applied = []
+        
+        try:
+            import re
+            
+            # Fix private member naming (add underscore prefix)
+            lines = content.split('\n')
+            fixed_lines = []
+            private_fixes = []
+            
+            for line in lines:
+                # Look for private members that don't start with underscore
+                # This is a simplified implementation
+                if 'private' in line.lower() and not '_' in line:
+                    # This would need more sophisticated parsing in real implementation
+                    pass  # Placeholder for private member fixing
+                fixed_lines.append(line)
+            
+            # Fix file naming suggestion (if file doesn't follow snake_case)
+            file_name = Path(file_path).stem
+            if not re.match(r'^[a-z][a-z0-9_]*$', file_name):
+                suggested_name = re.sub(r'([A-Z])', r'_\1', file_name).lower().lstrip('_')
+                fixes_applied.append(f"File should be renamed to: {suggested_name}.dart")
+                
+        except Exception as e:
+            logger.warning(f"Error fixing naming conventions: {e}")
+        
+        return content, fixes_applied
+
+    def _add_missing_const(self, content: str, file_path: str) -> Tuple[str, List[str]]:
+        """Add missing const keywords where appropriate."""
+        fixes_applied = []
+        
+        try:
+            import re
+            
+            # Look for widget constructors that could be const
+            widget_pattern = r'(\w+)\s*\('
+            lines = content.split('\n')
+            fixed_lines = []
+            const_added = False
+            
+            for line in lines:
+                fixed_line = line
+                
+                # Check for widget instantiation without const
+                if ('(' in line and ')' in line and 
+                    ('Widget' in line or any(widget in line for widget in ['Text', 'Container', 'Column', 'Row', 'Padding'])) and
+                    'const' not in line and 'new' not in line):
+                    
+                    # Simple heuristic: if the line looks like a widget constructor call
+                    # and doesn't already have const, try to add it
+                    if re.search(r'\w+\s*\(', line):
+                        # Add const before the constructor call
+                        fixed_line = re.sub(r'(\s*)(\w+)\s*\(', r'\1const \2(', line, count=1)
+                        if fixed_line != line:
+                            const_added = True
+                
+                fixed_lines.append(fixed_line)
+            
+            if const_added:
+                fixes_applied.append("Added missing const keywords")
+                content = '\n'.join(fixed_lines)
+                
+        except Exception as e:
+            logger.warning(f"Error adding missing const: {e}")
+        
+        return content, fixes_applied
+
+    def _fix_formatting_issues(self, content: str, file_path: str) -> Tuple[str, List[str]]:
+        """Fix general formatting issues."""
+        fixes_applied = []
+        
+        try:
+            import re
+            
+            # Fix brace formatting
+            # Ensure opening braces are on the same line
+            brace_pattern = r'\n\s*{'
+            if re.search(brace_pattern, content):
+                fixed_content = re.sub(r'\n\s*{', ' {', content)
+                if fixed_content != content:
+                    fixes_applied.append("Fixed brace formatting")
+                    content = fixed_content
+            
+            # Fix comma formatting (space after comma)
+            comma_pattern = r',(\S)'
+            if re.search(comma_pattern, content):
+                fixed_content = re.sub(comma_pattern, r', \1', content)
+                if fixed_content != content:
+                    fixes_applied.append("Fixed comma spacing")
+                    content = fixed_content
+            
+            # Fix semicolon spacing
+            semicolon_pattern = r';(\S)'
+            if re.search(semicolon_pattern, content):
+                fixed_content = re.sub(semicolon_pattern, r'; \1', content)
+                if fixed_content != content:
+                    fixes_applied.append("Fixed semicolon spacing")
+                    content = fixed_content
+                    
+        except Exception as e:
+            logger.warning(f"Error fixing formatting issues: {e}")
+        
+        return content, fixes_applied
+
+    async def _apply_dart_format(self, file_path: str, content: str) -> Dict[str, Any]:
+        """Apply dart format to the content."""
+        try:
+            # Write content to temporary file
+            import tempfile
+            import os
+            
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.dart', delete=False) as temp_file:
+                temp_file.write(content)
+                temp_file_path = temp_file.name
+            
+            # Run dart format
+            format_result = await self.use_tool(
+                "process",
+                "run_command",
+                {
+                    "command": f"dart format '{temp_file_path}'",
+                    "timeout": 30000
+                },
+                f"Running dart format on temporary file"
+            )
+            
+            if format_result.status == ToolStatus.SUCCESS:
+                # Read formatted content
+                read_result = await self.use_tool(
+                    "file_system",
+                    "read_file",
+                    {"file_path": temp_file_path},
+                    "Reading formatted content"
+                )
+                
+                if read_result.status == ToolStatus.SUCCESS:
+                    formatted_content = read_result.data.get("content", content)
+                    
+                    # Clean up temp file
+                    try:
+                        os.unlink(temp_file_path)
+                    except:
+                        pass
+                    
+                    return {
+                        "success": True,
+                        "formatted_content": formatted_content
+                    }
+            
+            # Clean up temp file on error
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+            
+            return {
+                "success": False,
+                "error": format_result.error_message if format_result.status != ToolStatus.SUCCESS else "Unknown error"
+            }
+            
+        except Exception as e:
+            logger.warning(f"Error applying dart format: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def validate_code_continuously(
+        self, 
+        project_path: str, 
+        file_patterns: Optional[List[str]] = None,
+        project_context: Optional[CodeProjectContext] = None
+    ) -> ValidationResult:
+        """
+        Perform continuous code validation using multiple analysis tools.
+        
+        Args:
+            project_path: Root path of the Flutter project
+            file_patterns: Optional list of file patterns to validate (defaults to all .dart files)
+            project_context: Project context for architecture validation
+            
+        Returns:
+            ValidationResult: Comprehensive validation results
+        """
+        try:
+            logger.info(f"Starting continuous code validation for: {project_path}")
+            
+            # Default patterns if not provided
+            if not file_patterns:
+                file_patterns = ["**/*.dart"]
+            
+            # Find all files to validate
+            files_to_validate = []
+            for pattern in file_patterns:
+                if not self.file_tool:
+                    await self.initialize_tools()
+                
+                find_result = await self.use_tool(
+                    "file_system",
+                    "find_files",
+                    {
+                        "root_path": project_path,
+                        "pattern": pattern,
+                        "max_depth": 10
+                    },
+                    f"Finding files matching pattern: {pattern}"
+                )
+                
+                if find_result.status == ToolStatus.SUCCESS:
+                    found_files = find_result.data.get("files", [])
+                    files_to_validate.extend(found_files)
+            
+            # Remove duplicates and filter out test files if desired
+            files_to_validate = list(set(files_to_validate))
+            
+            logger.info(f"Found {len(files_to_validate)} files to validate")
+            
+            # Initialize validation results
+            validation_issues = []
+            files_validated = 0
+            files_with_issues = 0
+            total_issues = 0
+            
+            # Validate each file
+            for file_path in files_to_validate:
+                try:
+                    logger.debug(f"Validating file: {file_path}")
+                    
+                    # Step 1: Syntax and type checking
+                    syntax_issues = await self._check_syntax_and_types(file_path)
+                    
+                    # Convert SyntaxIssues to ValidationIssues
+                    for syntax_issue in syntax_issues:
+                        validation_issue = ValidationIssue(
+                            issue_id=str(uuid.uuid4()),
+                            issue_type=IssueType.SYNTAX_ERROR if "error" in syntax_issue.error_type.lower() else IssueType.TYPE_ERROR,
+                            severity=IssueSeverity.ERROR if "error" in syntax_issue.error_type.lower() else IssueSeverity.WARNING,
+                            file_path=file_path,
+                            line_number=syntax_issue.line,
+                            column_number=syntax_issue.column,
+                            message=syntax_issue.message,
+                            context=syntax_issue.context,
+                            auto_fixable=False,  # Syntax errors typically need manual fixing
+                            priority_score=self._calculate_priority_score(
+                                IssueType.SYNTAX_ERROR if "error" in syntax_issue.error_type.lower() else IssueType.TYPE_ERROR,
+                                IssueSeverity.ERROR if "error" in syntax_issue.error_type.lower() else IssueSeverity.WARNING
+                            )
+                        )
+                        validation_issues.append(validation_issue)
+                    
+                    # Step 2: Architecture compliance checking (if project context provided)
+                    if project_context:
+                        arch_issues = await self._validate_architecture_compliance(file_path, project_context)
+                        
+                        for arch_issue in arch_issues:
+                            validation_issue = ValidationIssue(
+                                issue_id=str(uuid.uuid4()),
+                                issue_type=IssueType.ARCHITECTURE_VIOLATION,
+                                severity=IssueSeverity.WARNING if arch_issue.impact_level == "low" else IssueSeverity.ERROR,
+                                file_path=file_path,
+                                message=f"{arch_issue.violation_type}: {arch_issue.pattern_expected}",
+                                context=arch_issue.pattern_found,
+                                suggestion=arch_issue.recommendation,
+                                auto_fixable=arch_issue.impact_level in ["low", "medium"],
+                                priority_score=self._calculate_priority_score(
+                                    IssueType.ARCHITECTURE_VIOLATION,
+                                    IssueSeverity.WARNING if arch_issue.impact_level == "low" else IssueSeverity.ERROR
+                                )
+                            )
+                            validation_issues.append(validation_issue)
+                    
+                    # Step 3: Performance issue checking
+                    performance_issues = await self._check_performance_issues(file_path)
+                    
+                    for perf_issue in performance_issues:
+                        severity_map = {
+                            "low": IssueSeverity.INFO,
+                            "medium": IssueSeverity.WARNING,
+                            "high": IssueSeverity.ERROR
+                        }
+                        
+                        validation_issue = ValidationIssue(
+                            issue_id=str(uuid.uuid4()),
+                            issue_type=IssueType.PERFORMANCE_ISSUE,
+                            severity=severity_map.get(perf_issue.severity, IssueSeverity.WARNING),
+                            file_path=file_path,
+                            line_number=perf_issue.location.get("line", 0),
+                            column_number=perf_issue.location.get("column", 0),
+                            message=perf_issue.description,
+                            context=perf_issue.impact,
+                            suggestion=perf_issue.suggestion,
+                            auto_fixable=perf_issue.severity in ["low", "medium"],
+                            priority_score=self._calculate_priority_score(
+                                IssueType.PERFORMANCE_ISSUE,
+                                severity_map.get(perf_issue.severity, IssueSeverity.WARNING)
+                            )
+                        )
+                        validation_issues.append(validation_issue)
+                    
+                    files_validated += 1
+                    
+                    # Count files with issues
+                    file_issue_count = len(syntax_issues) + len(arch_issues if project_context else []) + len(performance_issues)
+                    if file_issue_count > 0:
+                        files_with_issues += 1
+                        total_issues += file_issue_count
+                    
+                except Exception as e:
+                    logger.error(f"Error validating file {file_path}: {e}")
+                    # Create an error validation issue
+                    error_issue = ValidationIssue(
+                        issue_id=str(uuid.uuid4()),
+                        issue_type=IssueType.SYNTAX_ERROR,
+                        severity=IssueSeverity.ERROR,
+                        file_path=file_path,
+                        message=f"Validation failed: {str(e)}",
+                        auto_fixable=False,
+                        priority_score=10  # High priority for validation errors
+                    )
+                    validation_issues.append(error_issue)
+            
+            # Calculate overall quality score (0-100, higher is better)
+            quality_score = max(0, 100 - (total_issues * 5))  # Deduct 5 points per issue
+            
+            # Create summary
+            summary = {
+                "files_validated": files_validated,
+                "files_with_issues": files_with_issues,
+                "total_issues": len(validation_issues),
+                "issue_breakdown": self._create_issue_breakdown(validation_issues),
+                "quality_score": quality_score,
+                "validation_duration": datetime.utcnow().isoformat()
+            }
+            
+            # Sort issues by priority score (highest first)
+            validation_issues.sort(key=lambda x: x.priority_score, reverse=True)
+            
+            result = ValidationResult(
+                validation_id=str(uuid.uuid4()),
+                project_path=project_path,
+                files_validated=files_validated,
+                issues_found=validation_issues,
+                overall_score=quality_score,
+                validation_timestamp=datetime.utcnow(),
+                summary=summary,
+                recommendations=self._generate_validation_recommendations(validation_issues)
+            )
+            
+            logger.info(
+                f"Validation completed: {files_validated} files, "
+                f"{len(validation_issues)} issues, quality score: {quality_score}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Continuous code validation failed: {e}")
+            return ValidationResult(
+                validation_id=str(uuid.uuid4()),
+                project_path=project_path,
+                files_validated=0,
+                issues_found=[],
+                overall_score=0,
+                validation_timestamp=datetime.utcnow(),
+                summary={"error": str(e)},
+                recommendations=[]
+            )
+
+    def _calculate_priority_score(self, issue_type: IssueType, severity: IssueSeverity) -> int:
+        """Calculate priority score for validation issues."""
+        
+        # Base scores by severity
+        severity_scores = {
+            IssueSeverity.CRITICAL: 10,
+            IssueSeverity.ERROR: 8,
+            IssueSeverity.WARNING: 5,
+            IssueSeverity.INFO: 2
+        }
+        
+        # Type multipliers
+        type_multipliers = {
+            IssueType.SYNTAX_ERROR: 1.5,
+            IssueType.TYPE_ERROR: 1.4,
+            IssueType.NULL_SAFETY: 1.3,
+            IssueType.ARCHITECTURE_VIOLATION: 1.0,
+            IssueType.PERFORMANCE_ISSUE: 0.8,
+            IssueType.STYLE_VIOLATION: 0.5,
+            IssueType.LINT_WARNING: 0.3
+        }
+        
+        base_score = severity_scores.get(severity, 2)
+        multiplier = type_multipliers.get(issue_type, 1.0)
+        
+        return int(base_score * multiplier)
+
+    def _create_issue_breakdown(self, issues: List[ValidationIssue]) -> Dict[str, int]:
+        """Create breakdown of issues by type and severity."""
+        breakdown = {
+            "by_type": {},
+            "by_severity": {}
+        }
+        
+        for issue in issues:
+            # Count by type
+            issue_type = issue.issue_type.value
+            breakdown["by_type"][issue_type] = breakdown["by_type"].get(issue_type, 0) + 1
+            
+            # Count by severity
+            severity = issue.severity.value
+            breakdown["by_severity"][severity] = breakdown["by_severity"].get(severity, 0) + 1
+        
+        return breakdown
+
+    def _generate_validation_recommendations(self, issues: List[ValidationIssue]) -> List[str]:
+        """Generate recommendations based on validation issues."""
+        recommendations = []
+        
+        if not issues:
+            recommendations.append("Great job! No validation issues found.")
+            return recommendations
+        
+        # Count different types of issues
+        issue_counts = {}
+        for issue in issues:
+            issue_type = issue.issue_type.value
+            issue_counts[issue_type] = issue_counts.get(issue_type, 0) + 1
+        
+        # Generate specific recommendations
+        if issue_counts.get("syntax_error", 0) > 0:
+            recommendations.append("Fix syntax errors first as they prevent compilation")
+        
+        if issue_counts.get("type_error", 0) > 0:
+            recommendations.append("Address type errors to improve code safety")
+        
+        if issue_counts.get("performance_issue", 0) > 5:
+            recommendations.append("Consider performance optimization - multiple performance issues detected")
+        
+        if issue_counts.get("architecture_violation", 0) > 0:
+            recommendations.append("Review architecture violations to maintain code organization")
+        
+        if issue_counts.get("style_violation", 0) > 10:
+            recommendations.append("Run dart format and fix style issues for better code consistency")
+        
+        # Auto-fixable issues
+        auto_fixable_count = sum(1 for issue in issues if issue.auto_fixable)
+        if auto_fixable_count > 0:
+            recommendations.append(f"{auto_fixable_count} issues can be automatically fixed")
+        
+        return recommendations
+
+    async def fix_validation_issues(
+        self,
+        validation_result: ValidationResult,
+        max_fixes: Optional[int] = None,
+        fix_types: Optional[List[IssueType]] = None,
+        dry_run: bool = False
+    ) -> FixResult:
+        """
+        Fix validation issues using LLM reasoning and automated fixes.
+        
+        Args:
+            validation_result: Results from validate_code_continuously
+            max_fixes: Maximum number of issues to fix (None for unlimited)
+            fix_types: Types of issues to fix (None for all auto-fixable)
+            dry_run: If True, only analyze fixes without applying them
+            
+        Returns:
+            FixResult: Results of the fixing operation
+        """
+        try:
+            logger.info(f"Starting to fix validation issues. Total issues: {len(validation_result.issues_found)}")
+            
+            # Filter issues that can be fixed
+            fixable_issues = [
+                issue for issue in validation_result.issues_found
+                if issue.auto_fixable and (fix_types is None or issue.issue_type in fix_types)
+            ]
+            
+            # Sort by priority score (highest first)
+            fixable_issues.sort(key=lambda x: x.priority_score, reverse=True)
+            
+            # Limit number of fixes if specified
+            if max_fixes:
+                fixable_issues = fixable_issues[:max_fixes]
+            
+            logger.info(f"Found {len(fixable_issues)} auto-fixable issues")
+            
+            # Initialize fix results
+            fixes_applied = []
+            fixes_failed = []
+            files_modified = set()
+            
+            # Process fixes by file to avoid conflicts
+            files_to_fix = {}
+            for issue in fixable_issues:
+                file_path = issue.file_path
+                if file_path not in files_to_fix:
+                    files_to_fix[file_path] = []
+                files_to_fix[file_path].append(issue)
+            
+            # Fix issues file by file
+            for file_path, file_issues in files_to_fix.items():
+                try:
+                    logger.debug(f"Fixing {len(file_issues)} issues in {file_path}")
+                    
+                    # Apply fixes for this file
+                    file_fix_result = await self._fix_file_issues(
+                        file_path, 
+                        file_issues,
+                        dry_run=dry_run
+                    )
+                    
+                    if file_fix_result.success:
+                        fixes_applied.extend(file_fix_result.changes_made)
+                        if not dry_run:
+                            files_modified.add(file_path)
+                        
+                        logger.info(f"Successfully fixed {len(file_fix_result.changes_made)} issues in {file_path}")
+                    else:
+                        # Record failed fixes
+                        for issue in file_issues:
+                            fixes_failed.append({
+                                "issue_id": issue.issue_id,
+                                "file_path": file_path,
+                                "error": file_fix_result.errors[0] if file_fix_result.errors else "Unknown error"
+                            })
+                        
+                        logger.warning(f"Failed to fix issues in {file_path}: {file_fix_result.errors}")
+                
+                except Exception as e:
+                    logger.error(f"Error fixing issues in {file_path}: {e}")
+                    # Record failed fixes for this file
+                    for issue in file_issues:
+                        fixes_failed.append({
+                            "issue_id": issue.issue_id,
+                            "file_path": file_path,
+                            "error": str(e)
+                        })
+            
+            # Create summary
+            total_attempted = len(fixable_issues)
+            total_successful = len(fixes_applied)
+            total_failed = len(fixes_failed)
+            
+            summary = {
+                "total_issues_analyzed": len(validation_result.issues_found),
+                "auto_fixable_issues": len(fixable_issues),
+                "fixes_attempted": total_attempted,
+                "fixes_successful": total_successful,
+                "fixes_failed": total_failed,
+                "files_modified": list(files_modified),
+                "dry_run": dry_run
+            }
+            
+            result = FixResult(
+                fix_id=str(uuid.uuid4()),
+                validation_id=validation_result.validation_id,
+                fixes_attempted=total_attempted,
+                fixes_successful=total_successful,
+                fixes_failed=total_failed,
+                changes_made=fixes_applied,
+                errors=fixes_failed,
+                summary=summary,
+                confidence_score=self._calculate_fix_confidence(fixes_applied, fixes_failed),
+                fix_timestamp=datetime.utcnow()
+            )
+            
+            logger.info(
+                f"Fix operation completed: {total_successful}/{total_attempted} successful fixes "
+                f"across {len(files_modified)} files"
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Fix validation issues failed: {e}")
+            return FixResult(
+                fix_id=str(uuid.uuid4()),
+                validation_id=validation_result.validation_id if validation_result else "unknown",
+                fixes_attempted=0,
+                fixes_successful=0,
+                fixes_failed=0,
+                changes_made=[],
+                errors=[{"error": str(e)}],
+                summary={"error": str(e)},
+                confidence_score=0,
+                fix_timestamp=datetime.utcnow()
+            )
+
+    async def _fix_file_issues(
+        self,
+        file_path: str,
+        issues: List[ValidationIssue],
+        dry_run: bool = False
+    ) -> FixResult:
+        """
+        Fix all issues in a single file using LLM reasoning.
+        
+        Args:
+            file_path: Path to the file to fix
+            issues: List of issues to fix in this file
+            dry_run: If True, only analyze fixes without applying them
+            
+        Returns:
+            FixResult: Results of fixing this file
+        """
+        try:
+            # Read current file content
+            read_result = await self.use_tool(
+                "file_system",
+                "read_file",
+                {"file_path": file_path},
+                f"Reading file for fixing: {file_path}"
+            )
+            
+            if read_result.status != ToolStatus.SUCCESS:
+                return FixResult(
+                    fix_id=str(uuid.uuid4()),
+                    validation_id="unknown",
+                    fixes_attempted=len(issues),
+                    fixes_successful=0,
+                    fixes_failed=len(issues),
+                    changes_made=[],
+                    errors=[f"Failed to read file: {read_result.error_message}"],
+                    summary={"error": "File read failed"},
+                    confidence_score=0,
+                    fix_timestamp=datetime.utcnow()
+                )
+            
+            original_content = read_result.data.get("content", "")
+            
+            # Group issues by type for better fixing
+            issues_by_type = {}
+            for issue in issues:
+                issue_type = issue.issue_type
+                if issue_type not in issues_by_type:
+                    issues_by_type[issue_type] = []
+                issues_by_type[issue_type].append(issue)
+            
+            # Apply fixes by type
+            current_content = original_content
+            changes_made = []
+            errors = []
+            
+            # Style fixes first (least risky)
+            if IssueType.STYLE_VIOLATION in issues_by_type:
+                style_result = await self._apply_style_fixes(file_path)
+                if style_result.success:
+                    current_content = style_result.fixed_content or current_content
+                    for fix in style_result.fixes_applied:
+                        changes_made.append({
+                            "type": "style_fix",
+                            "description": fix,
+                            "line": None,
+                            "confidence": 0.9
+                        })
+            
+            # Performance fixes
+            if IssueType.PERFORMANCE_ISSUE in issues_by_type:
+                perf_fixes = await self._fix_performance_issues(
+                    file_path, current_content, issues_by_type[IssueType.PERFORMANCE_ISSUE]
+                )
+                current_content = perf_fixes.get("content", current_content)
+                changes_made.extend(perf_fixes.get("changes", []))
+                errors.extend(perf_fixes.get("errors", []))
+            
+            # Architecture fixes
+            if IssueType.ARCHITECTURE_VIOLATION in issues_by_type:
+                arch_fixes = await self._fix_architecture_issues(
+                    file_path, current_content, issues_by_type[IssueType.ARCHITECTURE_VIOLATION]
+                )
+                current_content = arch_fixes.get("content", current_content)
+                changes_made.extend(arch_fixes.get("changes", []))
+                errors.extend(arch_fixes.get("errors", []))
+            
+            # LLM-based fixes for complex issues
+            remaining_issues = []
+            for issue_type, type_issues in issues_by_type.items():
+                if issue_type not in [IssueType.STYLE_VIOLATION, IssueType.PERFORMANCE_ISSUE, IssueType.ARCHITECTURE_VIOLATION]:
+                    remaining_issues.extend(type_issues)
+            
+            if remaining_issues:
+                llm_fixes = await self._apply_llm_fixes(
+                    file_path, current_content, remaining_issues
+                )
+                current_content = llm_fixes.get("content", current_content)
+                changes_made.extend(llm_fixes.get("changes", []))
+                errors.extend(llm_fixes.get("errors", []))
+            
+            # Write fixed content if not dry run and changes were made
+            if not dry_run and current_content != original_content:
+                write_result = await self.use_tool(
+                    "file_system",
+                    "write_file",
+                    {
+                        "file_path": file_path,
+                        "content": current_content
+                    },
+                    f"Writing fixed content to: {file_path}"
+                )
+                
+                if write_result.status != ToolStatus.SUCCESS:
+                    errors.append(f"Failed to write fixed content: {write_result.error_message}")
+            
+            # Calculate success metrics
+            fixes_attempted = len(issues)
+            fixes_successful = len(changes_made)
+            fixes_failed = len(errors)
+            
+            return FixResult(
+                fix_id=str(uuid.uuid4()),
+                validation_id="unknown",
+                fixes_attempted=fixes_attempted,
+                fixes_successful=fixes_successful,
+                fixes_failed=fixes_failed,
+                changes_made=changes_made,
+                errors=errors,
+                summary={
+                    "file_path": file_path,
+                    "original_lines": len(original_content.split('\n')),
+                    "fixed_lines": len(current_content.split('\n')),
+                    "content_changed": current_content != original_content
+                },
+                confidence_score=self._calculate_fix_confidence(changes_made, errors),
+                fix_timestamp=datetime.utcnow()
+            )
+            
+        except Exception as e:
+            logger.error(f"Error fixing file {file_path}: {e}")
+            return FixResult(
+                fix_id=str(uuid.uuid4()),
+                validation_id="unknown",
+                fixes_attempted=len(issues),
+                fixes_successful=0,
+                fixes_failed=len(issues),
+                changes_made=[],
+                errors=[str(e)],
+                summary={"error": str(e)},
+                confidence_score=0,
+                fix_timestamp=datetime.utcnow()
+            )
+
+    async def _fix_performance_issues(
+        self,
+        file_path: str,
+        content: str,
+        issues: List[ValidationIssue]
+    ) -> Dict[str, Any]:
+        """Fix performance issues in the code."""
+        
+        changes_made = []
+        errors = []
+        fixed_content = content
+        
+        try:
+            lines = content.split('\n')
+            
+            for issue in issues:
+                line_num = issue.line_number
+                if line_num and 0 < line_num <= len(lines):
+                    line = lines[line_num - 1]
+                    
+                    # Apply specific performance fixes based on issue message
+                    if "const constructor" in issue.message.lower():
+                        # Add const keyword
+                        import re
+                        if re.search(r'\w+\s*\(', line) and 'const' not in line:
+                            fixed_line = re.sub(r'(\s*)(\w+)\s*\(', r'\1const \2(', line, count=1)
+                            if fixed_line != line:
+                                lines[line_num - 1] = fixed_line
+                                changes_made.append({
+                                    "type": "performance_fix",
+                                    "description": "Added const constructor",
+                                    "line": line_num,
+                                    "confidence": 0.8
+                                })
+                    
+                    elif "stateful widget" in issue.message.lower() and "unnecessary" in issue.message.lower():
+                        # This would require more complex analysis to safely convert
+                        # For now, just record it as a suggestion
+                        changes_made.append({
+                            "type": "performance_suggestion",
+                            "description": "Consider converting to StatelessWidget",
+                            "line": line_num,
+                            "confidence": 0.6
+                        })
+            
+            fixed_content = '\n'.join(lines)
+            
+        except Exception as e:
+            errors.append(f"Error fixing performance issues: {e}")
+        
+        return {
+            "content": fixed_content,
+            "changes": changes_made,
+            "errors": errors
+        }
+
+    async def _fix_architecture_issues(
+        self,
+        file_path: str,
+        content: str,
+        issues: List[ValidationIssue]
+    ) -> Dict[str, Any]:
+        """Fix architecture issues in the code."""
+        
+        changes_made = []
+        errors = []
+        fixed_content = content
+        
+        try:
+            # Most architecture issues require manual intervention
+            # For now, provide suggestions rather than automatic fixes
+            for issue in issues:
+                changes_made.append({
+                    "type": "architecture_suggestion",
+                    "description": f"Architecture issue: {issue.message}",
+                    "suggestion": issue.suggestion,
+                    "line": issue.line_number,
+                    "confidence": 0.5
+                })
+            
+        except Exception as e:
+            errors.append(f"Error fixing architecture issues: {e}")
+        
+        return {
+            "content": fixed_content,
+            "changes": changes_made,
+            "errors": errors
+        }
+
+    async def _apply_llm_fixes(
+        self,
+        file_path: str,
+        content: str,
+        issues: List[ValidationIssue]
+    ) -> Dict[str, Any]:
+        """Use LLM reasoning to fix complex validation issues."""
+        
+        changes_made = []
+        errors = []
+        fixed_content = content
+        
+        try:
+            # Prepare context for LLM
+            issues_context = []
+            for issue in issues:
+                issues_context.append({
+                    "type": issue.issue_type.value,
+                    "severity": issue.severity.value,
+                    "line": issue.line_number,
+                    "column": issue.column_number,
+                    "message": issue.message,
+                    "context": issue.context,
+                    "suggestion": issue.suggestion
+                })
+            
+            # Create LLM prompt for fixing
+            fix_prompt = f"""
+            You are a Flutter/Dart code expert. Please fix the following validation issues in this code:
+            
+            File: {file_path}
+            
+            Issues to fix:
+            {json.dumps(issues_context, indent=2)}
+            
+            Original code:
+            ```dart
+            {content}
+            ```
+            
+            Please provide the fixed code and explain the changes made. Focus on:
+            1. Maintaining code functionality
+            2. Following Dart/Flutter best practices
+            3. Fixing only the specific issues mentioned
+            4. Preserving code style and structure
+            
+            Response format:
+            {{
+                "fixed_code": "the complete fixed code",
+                "changes_made": [
+                    {{
+                        "description": "what was changed",
+                        "line": line_number,
+                        "confidence": 0.0-1.0
+                    }}
+                ],
+                "explanation": "brief explanation of fixes"
+            }}
+            """
+            
+            # Call LLM
+            llm_response = await self.use_llm(fix_prompt)
+            
+            # Parse LLM response
+            try:
+                import json
+                response_data = json.loads(llm_response)
+                
+                if "fixed_code" in response_data:
+                    fixed_content = response_data["fixed_code"]
+                    
+                if "changes_made" in response_data:
+                    for change in response_data["changes_made"]:
+                        changes_made.append({
+                            "type": "llm_fix",
+                            "description": change.get("description", "LLM-generated fix"),
+                            "line": change.get("line"),
+                            "confidence": change.get("confidence", 0.7)
+                        })
+                        
+            except json.JSONDecodeError:
+                # Fallback: try to extract code from response
+                if "```dart" in llm_response:
+                    start = llm_response.find("```dart") + 7
+                    end = llm_response.find("```", start)
+                    if end > start:
+                        fixed_content = llm_response[start:end].strip()
+                        changes_made.append({
+                            "type": "llm_fix",
+                            "description": "LLM-generated code fix",
+                            "line": None,
+                            "confidence": 0.6
+                        })
+                else:
+                    errors.append("Failed to parse LLM response")
+            
+        except Exception as e:
+            errors.append(f"Error in LLM fixes: {e}")
+        
+        return {
+            "content": fixed_content,
+            "changes": changes_made,
+            "errors": errors
+        }
+
+    def _calculate_fix_confidence(self, changes_made: List[Dict], errors: List) -> float:
+        """Calculate confidence score for fix results."""
+        if not changes_made and not errors:
+            return 1.0
+        
+        if not changes_made:
+            return 0.0
+        
+        total_confidence = 0.0
+        for change in changes_made:
+            total_confidence += change.get("confidence", 0.5)
+        
+        avg_confidence = total_confidence / len(changes_made)
+        
+        # Reduce confidence based on errors
+        error_penalty = min(0.5, len(errors) * 0.1)
+        
+        return max(0.0, avg_confidence - error_penalty)
