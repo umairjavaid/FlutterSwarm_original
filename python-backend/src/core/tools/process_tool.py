@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
+import re
 
 from .base_tool import (
     BaseTool, ToolCapabilities, ToolOperation, ToolPermission, ToolResult, ToolStatus,
@@ -42,6 +43,8 @@ class ProcessTool(BaseTool):
         self.process_metadata: Dict[str, Dict[str, Any]] = {}
         self.port_registry: Dict[int, str] = {}
         self.device_registry: Dict[str, Dict[str, Any]] = {}
+        self.environment_cache: Dict[str, Any] = {}
+        self.last_environment_check = None
 
     async def get_capabilities(self) -> ToolCapabilities:
         """Get comprehensive process management capabilities."""
@@ -536,3 +539,531 @@ class ProcessTool(BaseTool):
                 "known_devices": len(self.device_registry)
             }
         }
+
+    async def validate_environment(self, params: Dict[str, Any]) -> ToolResult:
+        """Comprehensive environment validation for Flutter development."""
+        start_time = datetime.now()
+        
+        try:
+            validation_results = {
+                "flutter_sdk": await self._validate_flutter_sdk(),
+                "dart_sdk": await self._validate_dart_sdk(),
+                "android_tools": await self._validate_android_tools(),
+                "ios_tools": await self._validate_ios_tools() if self._is_macos() else {"available": False, "reason": "Not macOS"},
+                "connected_devices": await self._get_connected_devices(),
+                "environment_variables": await self._check_environment_variables(),
+                "system_requirements": await self._check_system_requirements()
+            }
+            
+            # Calculate health score
+            health_score = self._calculate_environment_health(validation_results)
+            
+            # Generate recommendations
+            recommendations = self._generate_environment_recommendations(validation_results)
+            
+            return ToolResult(
+                status=ToolStatus.SUCCESS,
+                data={
+                    "validation_results": validation_results,
+                    "health_score": health_score,
+                    "recommendations": recommendations,
+                    "validation_time": (datetime.now() - start_time).total_seconds(),
+                    "ready_for_development": health_score >= 0.7
+                },
+                execution_time=(datetime.now() - start_time).total_seconds()
+            )
+            
+        except Exception as e:
+            return ToolResult(
+                status=ToolStatus.FAILURE,
+                data={},
+                error_message=f"Environment validation failed: {str(e)}",
+                execution_time=(datetime.now() - start_time).total_seconds()
+            )
+
+    async def _validate_flutter_sdk(self) -> Dict[str, Any]:
+        """Validate Flutter SDK installation and configuration."""
+        try:
+            # Check flutter command availability
+            result = await self._run_command(["flutter", "--version"], timeout=10)
+            
+            if result["exit_code"] != 0:
+                return {
+                    "available": False,
+                    "issues": ["Flutter command not found in PATH"],
+                    "version": None
+                }
+            
+            # Parse version information
+            output = result["stdout"]
+            version_match = re.search(r'Flutter (\d+\.\d+\.\d+)', output)
+            version = version_match.group(1) if version_match else "unknown"
+            
+            # Check doctor status
+            doctor_result = await self._run_command(["flutter", "doctor", "--machine"], timeout=30)
+            doctor_data = {}
+            
+            if doctor_result["exit_code"] == 0:
+                try:
+                    doctor_data = json.loads(doctor_result["stdout"])
+                except json.JSONDecodeError:
+                    pass
+            
+            return {
+                "available": True,
+                "version": version,
+                "doctor_status": doctor_data,
+                "issues": self._extract_flutter_issues(doctor_data),
+                "path": await self._get_flutter_path()
+            }
+            
+        except Exception as e:
+            return {
+                "available": False,
+                "issues": [f"Flutter validation error: {str(e)}"],
+                "version": None
+            }
+
+    async def _validate_dart_sdk(self) -> Dict[str, Any]:
+        """Validate Dart SDK installation and configuration."""
+        try:
+            result = await self._run_command(["dart", "--version"], timeout=10)
+            
+            if result["exit_code"] != 0:
+                return {
+                    "available": False,
+                    "issues": ["Dart command not found in PATH"],
+                    "version": None
+                }
+            
+            # Parse version
+            output = result["stderr"] + result["stdout"]  # Dart outputs version to stderr
+            version_match = re.search(r'Dart SDK version: (\d+\.\d+\.\d+)', output)
+            version = version_match.group(1) if version_match else "unknown"
+            
+            return {
+                "available": True,
+                "version": version,
+                "issues": [],
+                "path": await self._get_dart_path()
+            }
+            
+        except Exception as e:
+            return {
+                "available": False,
+                "issues": [f"Dart validation error: {str(e)}"],
+                "version": None
+            }
+
+    async def _validate_android_tools(self) -> Dict[str, Any]:
+        """Validate Android development tools."""
+        validation_result = {
+            "available": False,
+            "android_sdk": None,
+            "android_studio": None,
+            "build_tools": None,
+            "emulators": [],
+            "issues": []
+        }
+        
+        try:
+            # Check ANDROID_HOME environment variable
+            android_home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+            
+            if not android_home:
+                validation_result["issues"].append("ANDROID_HOME environment variable not set")
+                return validation_result
+            
+            android_sdk_path = Path(android_home)
+            if not android_sdk_path.exists():
+                validation_result["issues"].append(f"Android SDK path does not exist: {android_home}")
+                return validation_result
+            
+            # Check SDK components
+            platform_tools = android_sdk_path / "platform-tools"
+            build_tools = android_sdk_path / "build-tools"
+            
+            validation_result["android_sdk"] = {
+                "path": str(android_sdk_path),
+                "platform_tools": platform_tools.exists(),
+                "build_tools": build_tools.exists()
+            }
+            
+            # Check for emulators
+            emulator_cmd = platform_tools / "adb"
+            if emulator_cmd.exists():
+                devices_result = await self._run_command([str(emulator_cmd), "devices"], timeout=10)
+                if devices_result["exit_code"] == 0:
+                    validation_result["emulators"] = self._parse_adb_devices(devices_result["stdout"])
+            
+            # Check if Android Studio is installed
+            validation_result["android_studio"] = await self._check_android_studio()
+            
+            validation_result["available"] = (
+                android_sdk_path.exists() and
+                platform_tools.exists() and
+                build_tools.exists()
+            )
+            
+        except Exception as e:
+            validation_result["issues"].append(f"Android tools validation error: {str(e)}")
+        
+        return validation_result
+
+    async def _validate_ios_tools(self) -> Dict[str, Any]:
+        """Validate iOS development tools (macOS only)."""
+        validation_result = {
+            "available": False,
+            "xcode": None,
+            "simulators": [],
+            "issues": []
+        }
+        
+        try:
+            # Check Xcode installation
+            xcode_result = await self._run_command(["xcode-select", "--print-path"], timeout=10)
+            
+            if xcode_result["exit_code"] != 0:
+                validation_result["issues"].append("Xcode not installed or not configured")
+                return validation_result
+            
+            xcode_path = xcode_result["stdout"].strip()
+            validation_result["xcode"] = {
+                "path": xcode_path,
+                "installed": True
+            }
+            
+            # Check for iOS simulators
+            simulators_result = await self._run_command(
+                ["xcrun", "simctl", "list", "devices", "--json"], 
+                timeout=15
+            )
+            
+            if simulators_result["exit_code"] == 0:
+                try:
+                    sim_data = json.loads(simulators_result["stdout"])
+                    validation_result["simulators"] = self._parse_ios_simulators(sim_data)
+                except json.JSONDecodeError:
+                    validation_result["issues"].append("Could not parse simulator list")
+            
+            validation_result["available"] = True
+            
+        except Exception as e:
+            validation_result["issues"].append(f"iOS tools validation error: {str(e)}")
+        
+        return validation_result
+
+    async def _get_connected_devices(self) -> List[Dict[str, Any]]:
+        """Get list of connected devices for Flutter development."""
+        devices = []
+        
+        try:
+            # Use flutter devices command
+            result = await self._run_command(["flutter", "devices", "--machine"], timeout=15)
+            
+            if result["exit_code"] == 0:
+                try:
+                    devices_data = json.loads(result["stdout"])
+                    for device in devices_data:
+                        devices.append({
+                            "id": device.get("id", "unknown"),
+                            "name": device.get("name", "Unknown Device"),
+                            "platform": device.get("platform", "unknown"),
+                            "type": device.get("type", "unknown"),
+                            "is_emulator": device.get("emulator", False),
+                            "available": device.get("available", False)
+                        })
+                except json.JSONDecodeError:
+                    pass
+            
+        except Exception as e:
+            logger.warning(f"Error getting connected devices: {e}")
+        
+        return devices
+
+    async def _check_environment_variables(self) -> Dict[str, Any]:
+        """Check important environment variables for Flutter development."""
+        important_vars = [
+            "FLUTTER_ROOT", "DART_SDK", "ANDROID_HOME", "ANDROID_SDK_ROOT",
+            "JAVA_HOME", "PATH"
+        ]
+        
+        env_status = {}
+        
+        for var in important_vars:
+            value = os.environ.get(var)
+            env_status[var] = {
+                "set": value is not None,
+                "value": value if value else None,
+                "valid": self._validate_env_var(var, value) if value else False
+            }
+        
+        return env_status
+
+    def _validate_env_var(self, var_name: str, value: str) -> bool:
+        """Validate if an environment variable points to a valid path."""
+        if var_name in ["FLUTTER_ROOT", "DART_SDK", "ANDROID_HOME", "ANDROID_SDK_ROOT", "JAVA_HOME"]:
+            return Path(value).exists() if value else False
+        elif var_name == "PATH":
+            return len(value.split(os.pathsep)) > 0 if value else False
+        return True
+
+    async def _check_system_requirements(self) -> Dict[str, Any]:
+        """Check system requirements for Flutter development."""
+        import platform
+        import psutil
+        
+        return {
+            "os": platform.system(),
+            "os_version": platform.version(),
+            "architecture": platform.machine(),
+            "cpu_cores": psutil.cpu_count(),
+            "memory_gb": round(psutil.virtual_memory().total / (1024**3), 1),
+            "disk_space_gb": round(psutil.disk_usage('/').free / (1024**3), 1),
+            "meets_requirements": self._check_minimum_requirements()
+        }
+
+    def _check_minimum_requirements(self) -> bool:
+        """Check if system meets minimum requirements for Flutter development."""
+        try:
+            import psutil
+            
+            # Minimum requirements
+            min_memory_gb = 4
+            min_disk_gb = 10
+            min_cores = 2
+            
+            memory_gb = psutil.virtual_memory().total / (1024**3)
+            disk_gb = psutil.disk_usage('/').free / (1024**3)
+            cores = psutil.cpu_count();
+            
+            return (
+                memory_gb >= min_memory_gb and
+                disk_gb >= min_disk_gb and
+                cores >= min_cores
+            )
+        except:
+            return True  # Assume OK if we can't check
+
+    def _calculate_environment_health(self, validation_results: Dict[str, Any]) -> float:
+        """Calculate overall environment health score."""
+        score = 1.0
+        
+        # Critical components
+        if not validation_results.get("flutter_sdk", {}).get("available", False):
+            score -= 0.4
+        
+        if not validation_results.get("dart_sdk", {}).get("available", False):
+            score -= 0.3
+        
+        # Platform tools
+        android_available = validation_results.get("android_tools", {}).get("available", False)
+        ios_available = validation_results.get("ios_tools", {}).get("available", False)
+        
+        if not android_available and not ios_available:
+            score -= 0.2
+        elif not android_available:
+            score -= 0.1
+        
+        # Connected devices
+        devices = validation_results.get("connected_devices", [])
+        if not devices:
+            score -= 0.1
+        
+        return max(0.0, score)
+
+    def _generate_environment_recommendations(self, validation_results: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate recommendations based on validation results."""
+        recommendations = []
+        
+        # Flutter SDK issues
+        flutter_sdk = validation_results.get("flutter_sdk", {})
+        if not flutter_sdk.get("available", False):
+            recommendations.append({
+                "priority": 1,
+                "category": "installation",
+                "title": "Install Flutter SDK",
+                "description": "Flutter SDK is required for Flutter development",
+                "steps": [
+                    "Download Flutter SDK from https://flutter.dev",
+                    "Extract to desired location",
+                    "Add Flutter bin directory to PATH",
+                    "Run 'flutter doctor' to verify installation"
+                ],
+                "automated": False,
+                "estimated_time_minutes": 30
+            })
+        
+        # Dart SDK issues
+        dart_sdk = validation_results.get("dart_sdk", {})
+        if not dart_sdk.get("available", False):
+            recommendations.append({
+                "priority": 1,
+                "category": "installation",
+                "title": "Install or Configure Dart SDK",
+                "description": "Dart SDK is required and usually comes with Flutter",
+                "steps": [
+                    "Ensure Flutter SDK is properly installed",
+                    "Add Flutter bin directory to PATH",
+                    "Verify with 'dart --version'"
+                ],
+                "automated": False,
+                "estimated_time_minutes": 10
+            })
+        
+        # Android tools
+        android_tools = validation_results.get("android_tools", {})
+        if not android_tools.get("available", False):
+            recommendations.append({
+                "priority": 2,
+                "category": "installation",
+                "title": "Set up Android Development Environment",
+                "description": "Android tools are needed for Android app development",
+                "steps": [
+                    "Install Android Studio",
+                    "Set up Android SDK",
+                    "Configure ANDROID_HOME environment variable",
+                    "Accept Android licenses with 'flutter doctor --android-licenses'"
+                ],
+                "automated": False,
+                "estimated_time_minutes": 45
+            })
+        
+        # Device connectivity
+        devices = validation_results.get("connected_devices", [])
+        if not devices:
+            recommendations.append({
+                "priority": 3,
+                "category": "configuration",
+                "title": "Connect Development Device",
+                "description": "No devices available for testing",
+                "steps": [
+                    "Connect a physical device via USB with debugging enabled",
+                    "Or start an Android/iOS emulator",
+                    "Verify with 'flutter devices'"
+                ],
+                "automated": False,
+                "estimated_time_minutes": 15
+            })
+        
+        return recommendations
+
+    # Helper methods
+    async def _run_command(self, cmd: List[str], timeout: int = 30) -> Dict[str, Any]:
+        """Run a system command and return result."""
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout
+            )
+            
+            return {
+                "exit_code": process.returncode,
+                "stdout": stdout.decode('utf-8', errors='ignore'),
+                "stderr": stderr.decode('utf-8', errors='ignore')
+            }
+            
+        except asyncio.TimeoutError:
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "Command timed out"
+            }
+        except Exception as e:
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": str(e)
+            }
+
+    def _is_macos(self) -> bool:
+        """Check if running on macOS."""
+        return platform.system() == "Darwin"
+
+    async def _get_flutter_path(self) -> Optional[str]:
+        """Get Flutter installation path."""
+        try:
+            result = await self._run_command(["which", "flutter"], timeout=5)
+            if result["exit_code"] == 0:
+                return result["stdout"].strip()
+        except:
+            pass
+        return None
+
+    async def _get_dart_path(self) -> Optional[str]:
+        """Get Dart installation path."""
+        try:
+            result = await self._run_command(["which", "dart"], timeout=5)
+            if result["exit_code"] == 0:
+                return result["stdout"].strip()
+        except:
+            pass
+        return None
+
+    def _extract_flutter_issues(self, doctor_data: Dict[str, Any]) -> List[str]:
+        """Extract issues from Flutter doctor output."""
+        issues = []
+        
+        if not doctor_data:
+            return issues
+        
+        for item in doctor_data.get("doctorText", []):
+            if item.get("type") == "error":
+                issues.append(item.get("message", "Unknown error"))
+        
+        return issues
+
+    def _parse_adb_devices(self, adb_output: str) -> List[Dict[str, Any]]:
+        """Parse ADB devices output."""
+        devices = []
+        lines = adb_output.strip().split('\n')[1:]  # Skip header
+        
+        for line in lines:
+            if line.strip():
+                parts = line.split('\t')
+                if len(parts) >= 2:
+                    devices.append({
+                        "id": parts[0],
+                        "status": parts[1],
+                        "type": "device" if parts[1] == "device" else "emulator"
+                    })
+        
+        return devices
+
+    def _parse_ios_simulators(self, sim_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Parse iOS simulator data."""
+        simulators = []
+        
+        devices = sim_data.get("devices", {})
+        for runtime, device_list in devices.items():
+            for device in device_list:
+                if device.get("isAvailable", False):
+                    simulators.append({
+                        "id": device.get("udid"),
+                        "name": device.get("name"),
+                        "runtime": runtime,
+                        "state": device.get("state")
+                    })
+        
+        return simulators
+
+    async def _check_android_studio(self) -> Dict[str, Any]:
+        """Check if Android Studio is installed."""
+        # Common Android Studio paths
+        studio_paths = [
+            "/Applications/Android Studio.app",  # macOS
+            "/opt/android-studio",  # Linux
+            "C:\\Program Files\\Android\\Android Studio"  # Windows
+        ]
+        
+        for path in studio_paths:
+            if Path(path).exists():
+                return {"installed": True, "path": path}
+        
+        return {"installed": False, "path": None}
