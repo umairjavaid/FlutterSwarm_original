@@ -53,6 +53,30 @@ class CodeConvention(Enum):
     FOLDER_STRUCTURE = "folder_structure"
 
 
+class RefactoringType(Enum):
+    """Types of refactoring operations."""
+    RENAME_FILE = "rename_file"
+    MOVE_FILE = "move_file"
+    EXTRACT_CLASS = "extract_class"
+    MERGE_FILES = "merge_files"
+    SPLIT_FILE = "split_file"
+    REORGANIZE_STRUCTURE = "reorganize_structure"
+    RENAME_CLASS = "rename_class"
+    RENAME_METHOD = "rename_method"
+    MOVE_CLASS = "move_class"
+    UPDATE_IMPORTS = "update_imports"
+    RESTRUCTURE_DIRECTORY = "restructure_directory"
+    REFACTOR_ARCHITECTURE = "refactor_architecture"
+
+
+class RiskLevel(Enum):
+    """Risk levels for refactoring operations."""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
 @dataclass
 class CodePattern:
     """Represents a discovered code pattern in the project."""
@@ -598,4 +622,286 @@ class UpdateResult:
             "has_errors": self.has_errors(),
             "total_modifications": self.get_total_modifications(),
             "affected_files": self.get_affected_files()
+        }
+
+
+@dataclass
+class RefactoringRequest:
+    """Request for code refactoring operation."""
+    refactoring_id: str
+    refactoring_type: RefactoringType
+    target_files: List[str] = field(default_factory=list)
+    new_structure: Dict[str, Any] = field(default_factory=dict)
+    options: Dict[str, Any] = field(default_factory=dict)
+    description: str = ""
+    preserve_git_history: bool = True
+    backup_before_refactoring: bool = True
+    verify_after_refactoring: bool = True
+    dry_run: bool = False
+    requested_by: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_primary_target(self) -> Optional[str]:
+        """Get the primary target file for refactoring."""
+        return self.target_files[0] if self.target_files else None
+    
+    def is_structural_change(self) -> bool:
+        """Check if this refactoring involves structural changes."""
+        structural_types = {
+            RefactoringType.MOVE_FILE,
+            RefactoringType.REORGANIZE_STRUCTURE,
+            RefactoringType.RESTRUCTURE_DIRECTORY,
+            RefactoringType.REFACTOR_ARCHITECTURE
+        }
+        return self.refactoring_type in structural_types
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "refactoring_id": self.refactoring_id,
+            "refactoring_type": self.refactoring_type.value,
+            "target_files": self.target_files,
+            "new_structure": self.new_structure,
+            "options": self.options,
+            "description": self.description,
+            "preserve_git_history": self.preserve_git_history,
+            "backup_before_refactoring": self.backup_before_refactoring,
+            "verify_after_refactoring": self.verify_after_refactoring,
+            "dry_run": self.dry_run,
+            "requested_by": self.requested_by,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat(),
+            "primary_target": self.get_primary_target(),
+            "is_structural_change": self.is_structural_change()
+        }
+
+
+@dataclass
+class ImpactAnalysis:
+    """Analysis of refactoring impact on the project."""
+    analysis_id: str
+    affected_files: List[str] = field(default_factory=list)
+    breaking_changes: List[str] = field(default_factory=list)
+    risk_level: RiskLevel = RiskLevel.MEDIUM
+    dependencies_to_update: List[str] = field(default_factory=list)
+    import_changes: Dict[str, List[str]] = field(default_factory=dict)
+    test_files_affected: List[str] = field(default_factory=list)
+    configuration_changes: List[str] = field(default_factory=list)
+    estimated_effort: str = "medium"  # low, medium, high
+    warnings: List[str] = field(default_factory=list)
+    recommendations: List[str] = field(default_factory=list)
+    rollback_complexity: str = "medium"  # easy, medium, hard
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    analyzed_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_total_impact_score(self) -> float:
+        """Calculate total impact score based on various factors."""
+        score = 0.0
+        
+        # Base score from number of affected files
+        score += len(self.affected_files) * 0.1
+        
+        # Risk level multiplier
+        risk_multipliers = {
+            RiskLevel.LOW: 1.0,
+            RiskLevel.MEDIUM: 2.0,
+            RiskLevel.HIGH: 4.0,
+            RiskLevel.CRITICAL: 8.0
+        }
+        score *= risk_multipliers.get(self.risk_level, 2.0)
+        
+        # Breaking changes penalty
+        score += len(self.breaking_changes) * 2.0
+        
+        # Test file impact
+        score += len(self.test_files_affected) * 0.5
+        
+        return min(score, 100.0)  # Cap at 100
+    
+    def is_safe_to_proceed(self) -> bool:
+        """Determine if it's safe to proceed with refactoring."""
+        if self.risk_level == RiskLevel.CRITICAL:
+            return False
+        if len(self.breaking_changes) > 10:
+            return False
+        if self.get_total_impact_score() > 50:
+            return False
+        return True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "analysis_id": self.analysis_id,
+            "affected_files": self.affected_files,
+            "breaking_changes": self.breaking_changes,
+            "risk_level": self.risk_level.value,
+            "dependencies_to_update": self.dependencies_to_update,
+            "import_changes": self.import_changes,
+            "test_files_affected": self.test_files_affected,
+            "configuration_changes": self.configuration_changes,
+            "estimated_effort": self.estimated_effort,
+            "warnings": self.warnings,
+            "recommendations": self.recommendations,
+            "rollback_complexity": self.rollback_complexity,
+            "metadata": self.metadata,
+            "analyzed_at": self.analyzed_at.isoformat(),
+            "total_impact_score": self.get_total_impact_score(),
+            "safe_to_proceed": self.is_safe_to_proceed()
+        }
+
+
+@dataclass
+class MovementPlan:
+    """Detailed plan for file movements and structural changes."""
+    plan_id: str
+    file_moves: List[Dict[str, str]] = field(default_factory=list)  # old_path -> new_path
+    directory_changes: List[Dict[str, str]] = field(default_factory=list)
+    dependency_updates: List[Dict[str, Any]] = field(default_factory=list)
+    import_updates: Dict[str, List[str]] = field(default_factory=dict)
+    export_updates: Dict[str, List[str]] = field(default_factory=dict)
+    barrel_file_updates: List[str] = field(default_factory=list)
+    git_operations: List[Dict[str, str]] = field(default_factory=list)
+    execution_order: List[str] = field(default_factory=list)
+    rollback_steps: List[Dict[str, Any]] = field(default_factory=list)
+    prerequisites: List[str] = field(default_factory=list)
+    validation_steps: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_move_count(self) -> int:
+        """Get total number of file moves."""
+        return len(self.file_moves)
+    
+    def get_affected_directories(self) -> Set[str]:
+        """Get all directories affected by the movement plan."""
+        directories = set()
+        
+        for move in self.file_moves:
+            old_dir = str(Path(move.get("old_path", "")).parent)
+            new_dir = str(Path(move.get("new_path", "")).parent)
+            directories.add(old_dir)
+            directories.add(new_dir)
+        
+        for change in self.directory_changes:
+            directories.add(change.get("old_path", ""))
+            directories.add(change.get("new_path", ""))
+        
+        return directories
+    
+    def estimate_duration_minutes(self) -> int:
+        """Estimate duration in minutes for executing the plan."""
+        base_time = 5  # Base 5 minutes
+        move_time = len(self.file_moves) * 2  # 2 minutes per file move
+        update_time = len(self.dependency_updates) * 1  # 1 minute per dependency update
+        git_time = len(self.git_operations) * 3  # 3 minutes per git operation
+        
+        return base_time + move_time + update_time + git_time
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "plan_id": self.plan_id,
+            "file_moves": self.file_moves,
+            "directory_changes": self.directory_changes,
+            "dependency_updates": self.dependency_updates,
+            "import_updates": self.import_updates,
+            "export_updates": self.export_updates,
+            "barrel_file_updates": self.barrel_file_updates,
+            "git_operations": self.git_operations,
+            "execution_order": self.execution_order,
+            "rollback_steps": self.rollback_steps,
+            "prerequisites": self.prerequisites,
+            "validation_steps": self.validation_steps,
+            "metadata": self.metadata,
+            "created_at": self.created_at.isoformat(),
+            "move_count": self.get_move_count(),
+            "affected_directories": list(self.get_affected_directories()),
+            "estimated_duration_minutes": self.estimate_duration_minutes()
+        }
+
+
+@dataclass
+class RefactoringResult:
+    """Result of code refactoring operation."""
+    refactoring_id: str
+    files_moved: List[Dict[str, str]] = field(default_factory=list)  # old_path -> new_path
+    references_updated: List[str] = field(default_factory=list)
+    imports_updated: Dict[str, List[str]] = field(default_factory=dict)
+    exports_updated: Dict[str, List[str]] = field(default_factory=dict)
+    directories_created: List[str] = field(default_factory=list)
+    directories_removed: List[str] = field(default_factory=list)
+    barrel_files_updated: List[str] = field(default_factory=list)
+    git_operations_performed: List[str] = field(default_factory=list)
+    backup_paths: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    success: bool = True
+    partial_success: bool = False
+    rollback_info: Dict[str, Any] = field(default_factory=dict)
+    verification_results: Dict[str, Any] = field(default_factory=dict)
+    performance_metrics: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    completed_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def get_total_files_affected(self) -> int:
+        """Get total number of files affected by refactoring."""
+        return len(set(
+            [move.get("old_path", "") for move in self.files_moved] +
+            [move.get("new_path", "") for move in self.files_moved] +
+            self.references_updated +
+            list(self.imports_updated.keys()) +
+            list(self.exports_updated.keys())
+        ))
+    
+    def has_errors(self) -> bool:
+        """Check if refactoring had errors."""
+        return not self.success or len(self.errors) > 0
+    
+    def was_successful(self) -> bool:
+        """Check if refactoring was completely successful."""
+        return self.success and not self.errors
+    
+    def needs_rollback(self) -> bool:
+        """Determine if rollback is needed."""
+        return self.has_errors() and not self.partial_success
+    
+    def get_rollback_info(self) -> Dict[str, Any]:
+        """Get detailed rollback information."""
+        return {
+            "refactoring_id": self.refactoring_id,
+            "backup_paths": self.backup_paths,
+            "files_to_restore": [move.get("old_path", "") for move in self.files_moved],
+            "git_operations_to_undo": self.git_operations_performed,
+            "directories_to_cleanup": self.directories_created,
+            "rollback_complexity": len(self.files_moved) + len(self.git_operations_performed)
+        }
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "refactoring_id": self.refactoring_id,
+            "files_moved": self.files_moved,
+            "references_updated": self.references_updated,
+            "imports_updated": self.imports_updated,
+            "exports_updated": self.exports_updated,
+            "directories_created": self.directories_created,
+            "directories_removed": self.directories_removed,
+            "barrel_files_updated": self.barrel_files_updated,
+            "git_operations_performed": self.git_operations_performed,
+            "backup_paths": self.backup_paths,
+            "errors": self.errors,
+            "warnings": self.warnings,
+            "success": self.success,
+            "partial_success": self.partial_success,
+            "rollback_info": self.rollback_info,
+            "verification_results": self.verification_results,
+            "performance_metrics": self.performance_metrics,
+            "metadata": self.metadata,
+            "completed_at": self.completed_at.isoformat(),
+            "total_files_affected": self.get_total_files_affected(),
+            "has_errors": self.has_errors(),
+            "was_successful": self.was_successful(),
+            "needs_rollback": self.needs_rollback(),
+            "rollback_details": self.get_rollback_info()
         }
