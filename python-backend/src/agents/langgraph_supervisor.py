@@ -137,14 +137,16 @@ class SupervisorAgent:
             "agent_assignment",
             self._agent_dispatch_router,
             {
-                "implementation": "implementation_agent",
-                "architecture": "architecture_agent", 
-                "testing": "testing_agent",
-                "security": "security_agent",
-                "devops": "devops_agent",
-                "documentation": "documentation_agent",
-                "performance": "performance_agent",
+                "implementation_agent": "implementation_agent",
+                "architecture_agent": "architecture_agent", 
+                "testing_agent": "testing_agent",
+                "security_agent": "security_agent",
+                "devops_agent": "devops_agent",
+                "documentation_agent": "documentation_agent",
+                "performance_agent": "performance_agent",
                 "monitor": "execution_monitor",
+                "aggregate": "result_aggregation",
+                "supervisor": "supervisor",
                 "error": "error_handler"
             }
         )
@@ -179,6 +181,10 @@ class SupervisorAgent:
             }
         )
         
+        # Add edges from all agent nodes back to execution monitor
+        for agent_type in ["architecture", "implementation", "testing", "security", "devops", "documentation", "performance"]:
+            workflow.add_edge(f"{agent_type}_agent", "execution_monitor")
+        
         # Set entry point
         workflow.set_entry_point("supervisor")
         
@@ -192,13 +198,13 @@ class SupervisorAgent:
         agent_assignments = state.get("agent_assignments", {})
         
         # Find the next task that has an agent assigned but hasn't been dispatched yet
-        # This logic might need refinement based on how tasks are picked up by agents
-        for task_id, agent_id in agent_assignments.items():
-            if task_id in active_tasks and active_tasks[task_id].get("status") == "assigned":
-                agent_type = active_tasks[task_id].get("agent_type")
+        for task_id, task_info in active_tasks.items():
+            if task_info.get("status") == "assigned":
+                agent_type = task_info.get("agent_type")
                 if agent_type:
-                    logger.info(f"Dispatching task {task_id} to {agent_type}_agent")
-                    return f"{agent_type}_agent" # Route to the specific agent node
+                    agent_node_name = f"{agent_type}_agent"
+                    logger.info(f"Dispatching task {task_id} to {agent_node_name}")
+                    return agent_node_name
 
         # If no specific agent to dispatch to, or all dispatched tasks are running,
         # move to monitoring or another appropriate state.
@@ -209,8 +215,8 @@ class SupervisorAgent:
             logger.info("No tasks to dispatch, but pending tasks exist. Returning to supervisor.")
             return "supervisor"
         else: # No active or pending tasks, but maybe completed or error states
-            logger.info("No tasks to dispatch and no pending tasks. Moving to error or aggregation.")
-            return "error" # Or "aggregate" if appropriate
+            logger.info("No tasks to dispatch and no pending tasks. Moving to aggregation.")
+            return "aggregate"
 
     def _add_agent_nodes(self, workflow: StateGraph):
         """Add specialized agent nodes to the workflow."""
@@ -886,7 +892,7 @@ class SupervisorAgent:
     
     def _parse_task_decomposition(self, response: str) -> Dict[str, Any]:
         """Parse task decomposition response."""
-        logger.debug(f"Original LLM response for task decomposition:\n{response}") # Log the original full response
+        logger.debug(f"Original LLM response for task decomposition:\n{response}")
         try:
             # Clean up the response
             response_clean = response.strip()
@@ -907,7 +913,7 @@ class SupervisorAgent:
             response_clean = response_clean.strip()
             logger.debug(f"Cleaned response (after marker removal and strip):\n{response_clean}")
             
-            # Attempt to find the start and end of the JSON object or array
+            # Try to extract JSON by finding complete objects or arrays
             start_index = -1
             end_index = -1
 
@@ -922,38 +928,90 @@ class SupervisorAgent:
                 logger.debug(f"Identified potential JSON object starting at: {start_index}")
                 # Find the matching '}'
                 brace_count = 0
+                in_string = False
+                escape_next = False
+                
                 for i in range(start_index, len(response_clean)):
-                    if response_clean[i] == '{':
-                        brace_count += 1
-                    elif response_clean[i] == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            end_index = i + 1
-                            logger.debug(f"Found matching closing brace at: {end_index}")
-                            break
+                    char = response_clean[i]
+                    
+                    if escape_next:
+                        escape_next = False
+                        continue
+                    
+                    if char == '\\' and in_string:
+                        escape_next = True
+                        continue
+                    
+                    if char == '"' and not escape_next:
+                        in_string = not in_string
+                        continue
+                    
+                    if not in_string:
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end_index = i + 1
+                                logger.debug(f"Found matching closing brace at: {end_index}")
+                                break
+                                
                 if end_index == -1:
                     logger.warning("Could not find matching closing brace for potential JSON object.")
+                    # Try to find where JSON might end with some heuristics
+                    # Look for pattern like '}' followed by non-JSON content
+                    for i in range(len(response_clean) - 1, start_index, -1):
+                        if response_clean[i] == '}':
+                            # Check if this could be the end by validating the substring
+                            test_json = response_clean[start_index:i+1]
+                            try:
+                                json.loads(test_json)
+                                end_index = i + 1
+                                logger.debug(f"Found valid JSON ending at: {end_index}")
+                                break
+                            except:
+                                continue
+                                
             elif first_bracket != -1:
                 # It's likely a JSON array
                 start_index = first_bracket
                 logger.debug(f"Identified potential JSON array starting at: {start_index}")
                 # Find the matching ']'
                 bracket_count = 0
+                in_string = False
+                escape_next = False
+                
                 for i in range(start_index, len(response_clean)):
-                    if response_clean[i] == '[':
-                        bracket_count += 1
-                    elif response_clean[i] == ']':
-                        bracket_count -= 1
-                        if bracket_count == 0:
-                            end_index = i + 1
-                            logger.debug(f"Found matching closing bracket at: {end_index}")
-                            break
+                    char = response_clean[i]
+                    
+                    if escape_next:
+                        escape_next = False
+                        continue
+                    
+                    if char == '\\' and in_string:
+                        escape_next = True
+                        continue
+                    
+                    if char == '"' and not escape_next:
+                        in_string = not in_string
+                        continue
+                    
+                    if not in_string:
+                        if char == '[':
+                            bracket_count += 1
+                        elif char == ']':
+                            bracket_count -= 1
+                            if bracket_count == 0:
+                                end_index = i + 1
+                                logger.debug(f"Found matching closing bracket at: {end_index}")
+                                break
+                                
                 if end_index == -1:
                     logger.warning("Could not find matching closing bracket for potential JSON array.")
             
             if start_index != -1 and end_index > start_index:
                 json_str = response_clean[start_index:end_index]
-                logger.debug(f"Extracted JSON string for parsing:\n{json_str}")
+                logger.debug(f"Extracted JSON string for parsing (length: {len(json_str)}):\n{json_str[:500]}{'...' if len(json_str) > 500 else ''}")
                 try:
                     result = json.loads(json_str)
                     logger.info("Successfully parsed extracted JSON string.")
@@ -972,14 +1030,14 @@ class SupervisorAgent:
                     return result
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse extracted JSON string: {e}")
-                    logger.debug(f"Attempted to parse (from extracted string):\n{json_str}")
+                    logger.debug(f"Attempted to parse (from extracted string):\n{json_str[:500]}{'...' if len(json_str) > 500 else ''}")
                     return {"tasks": [], "error": f"JSON parsing failed for extracted string: {str(e)}"}
             else:
                 logger.error(f"Could not find a valid JSON object or array substring. Start: {start_index}, End: {end_index}. Will attempt to parse entire cleaned response.")
+                
                 # Fallback: try to parse the whole cleaned response if no specific block was found
                 try:
-                    logger.info("Attempting to parse the entire cleaned response as JSON (fallback)." )
-                    logger.debug(f"Entire cleaned response for fallback parsing:\n{response_clean}")
+                    logger.info("Attempting to parse the entire cleaned response as JSON (fallback).")
                     result = json.loads(response_clean)
                     logger.info("Successfully parsed entire cleaned response (fallback).")
                     if isinstance(result, dict) and ("tasks" not in result or not isinstance(result.get("tasks"), list)):
@@ -994,12 +1052,10 @@ class SupervisorAgent:
                     return result
                 except json.JSONDecodeError as e_fallback:
                     logger.error(f"Fallback JSON parsing also failed for the entire cleaned response: {e_fallback}")
-                    logger.debug(f"Entire cleaned response that failed fallback parsing:\n{response_clean}")
                     return {"tasks": [], "error": "No valid JSON substring found, and fallback parsing of entire response also failed"}
                 
         except Exception as e: # Catch any other unexpected errors
             logger.error(f"An unexpected error occurred during task decomposition parsing: {e}", exc_info=True)
-            logger.debug(f"Original response during unexpected error:\n{response}")
             return {"tasks": [], "error": f"Unexpected error during parsing: {str(e)}"}
     
     def _find_best_agent(self, task: Dict[str, Any], available_agents: Dict[str, Any]) -> Optional[str]:
@@ -1016,7 +1072,10 @@ class SupervisorAgent:
             # Return agent with lowest load
             return min(suitable_agents, key=lambda x: available_agents[x].get("current_load", 0))
         
-        return None
+        # If no exact match, return the first available agent of the required type
+        # Create a fallback agent entry
+        fallback_agent_id = f"{required_agent_type}_agent"
+        return fallback_agent_id
     
     def _determine_recovery_strategy(self, state: WorkflowState) -> str:
         """Determine error recovery strategy."""
@@ -1069,6 +1128,36 @@ class SupervisorAgent:
                     "availability": True,
                     "current_load": 0,
                     "capabilities": ["code_generation", "feature_implementation"]
+                },
+                "testing_agent": {
+                    "agent_type": "testing",
+                    "availability": True,
+                    "current_load": 0,
+                    "capabilities": ["test_creation", "quality_assurance"]
+                },
+                "security_agent": {
+                    "agent_type": "security",
+                    "availability": True,
+                    "current_load": 0,
+                    "capabilities": ["security_analysis", "vulnerability_assessment"]
+                },
+                "devops_agent": {
+                    "agent_type": "devops",
+                    "availability": True,
+                    "current_load": 0,
+                    "capabilities": ["deployment", "ci_cd"]
+                },
+                "documentation_agent": {
+                    "agent_type": "documentation",
+                    "availability": True,
+                    "current_load": 0,
+                    "capabilities": ["documentation_creation", "api_docs"]
+                },
+                "performance_agent": {
+                    "agent_type": "performance",
+                    "availability": True,
+                    "current_load": 0,
+                    "capabilities": ["performance_analysis", "optimization"]
                 }
             },
             "agent_assignments": {},

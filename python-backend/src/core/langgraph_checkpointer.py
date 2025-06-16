@@ -238,15 +238,23 @@ class MemoryCheckpointSaver(MemorySaver):
         super().__init__()
         self.max_checkpoints = max_checkpoints
 
-    async def put(
+    def put(
         self,
         config: RunnableConfig,
         checkpoint: Checkpoint,
         metadata: CheckpointMetadata,
         new_versions: Dict[str, Any]
     ) -> RunnableConfig:
+        """Synchronous put method to avoid coroutine warnings."""
         result = super().put(config, checkpoint, metadata, new_versions)
-        await self._cleanup_old_checkpoints()
+        # Note: Cannot await _cleanup_old_checkpoints in sync method
+        # Consider periodic cleanup instead
+        if len(self.storage) > self.max_checkpoints:
+            # Remove oldest checkpoints synchronously
+            sorted_keys = sorted(self.storage.keys())
+            keys_to_remove = sorted_keys[:-self.max_checkpoints]
+            for key in keys_to_remove:
+                del self.storage[key]
         return result
     
     async def _cleanup_old_checkpoints(self) -> None:
