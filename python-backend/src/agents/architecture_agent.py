@@ -86,8 +86,13 @@ class ArchitectureAgent(BaseAgent):
 
     async def get_system_prompt(self) -> str:
         """Get the system prompt for the architecture agent."""
-        config_prompt = agent_config_manager.get_system_prompt(self.agent_type)
-        return config_prompt if config_prompt else await self._get_default_system_prompt()
+        try:
+            from ..config.agent_configs import agent_config_manager
+            config_prompt = agent_config_manager.get_system_prompt(self.agent_type)
+            return config_prompt if config_prompt else await self._get_default_system_prompt()
+        except ImportError as e:
+            logger.warning(f"Could not load agent configuration: {e}")
+            return await self._get_default_system_prompt()
 
     async def _get_default_system_prompt(self) -> str:
         """Get the default system prompt for the architecture agent."""
@@ -157,7 +162,7 @@ Always provide detailed rationale for architectural decisions and include specif
         logger.info(f"Designing architecture for task: {task_context.task_id}")
         
         # Analyze project requirements
-        project_context = task_context.project_context
+        project_context = task_context.metadata.get("project_context", {})
         
         # Use LLM to design architecture based on requirements
         design_prompt = self._create_architecture_design_prompt(task_context, project_context)
@@ -180,7 +185,7 @@ Always provide detailed rationale for architectural decisions and include specif
                 "project": project_context.get('project_name'),
                 "patterns": architecture_design.get('patterns', [])
             },
-            correlation_id=task_context.correlation_id,
+            correlation_id=task_context.metadata.get("correlation_id", task_context.task_id),
             importance=0.9,
             long_term=True
         )
@@ -205,7 +210,7 @@ Always provide detailed rationale for architectural decisions and include specif
         """Analyze existing architecture and provide recommendations."""
         logger.info(f"Analyzing architecture for task: {task_context.task_id}")
         
-        project_context = task_context.project_context
+        project_context = task_context.metadata.get("project_context", {})
         
         # Create comprehensive analysis prompt
         analysis_prompt = self._create_architecture_analysis_prompt(task_context, project_context)
@@ -228,7 +233,7 @@ Always provide detailed rationale for architectural decisions and include specif
                 "project": project_context.get('project_name'),
                 "issues_found": len(analysis_result.get('issues', []))
             },
-            correlation_id=task_context.correlation_id,
+            correlation_id=task_context.metadata.get("correlation_id", task_context.task_id),
             importance=0.8,
             long_term=True
         )
@@ -272,7 +277,7 @@ Always provide detailed rationale for architectural decisions and include specif
                 "scope": refactoring_plan.get('scope'),
                 "estimated_effort": refactoring_plan.get('estimated_effort')
             },
-            correlation_id=task_context.correlation_id,
+            correlation_id=task_context.metadata.get("correlation_id", task_context.task_id),
             importance=0.8,
             long_term=True
         )

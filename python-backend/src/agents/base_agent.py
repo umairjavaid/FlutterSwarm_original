@@ -21,9 +21,8 @@ from ..core.exceptions import AgentError, LLMError
 
 from ..core.event_bus import EventBus
 from ..core.memory_manager import MemoryManager
-from ..models.agent_models import AgentMessage, AgentStatus, TaskResult, MessageType
+from ..models.agent_models import AgentMessage, AgentStatus, TaskResult, TaskStatus, MessageType
 from ..models.task_models import TaskContext
-from ..config.agent_configs import agent_config_manager
 from ..core.enhanced_logger import get_logger, log_operation, log_llm_interaction, log_performance_metrics
 from ..config import get_logger as get_config_logger
 from ..core.tools.base_tool import BaseTool
@@ -149,7 +148,12 @@ class BaseAgent(ABC, AdvancedToolWorkflowMixin):
         self.last_activity = datetime.utcnow()
         
         # Load agent-specific configuration
-        self.agent_config = agent_config_manager.get_agent_config(self.agent_type)
+        try:
+            from ..config.agent_configs import agent_config_manager
+            self.agent_config = agent_config_manager.get_agent_config(self.agent_type)
+        except ImportError as e:
+            self.logger.warning(f"Could not load agent configuration: {e}")
+            self.agent_config = None
         
         # Initialize enhanced logging
         self.logger = get_config_logger(
@@ -219,14 +223,17 @@ class BaseAgent(ABC, AdvancedToolWorkflowMixin):
         Returns:
             Comprehensive system prompt string for LLM initialization
         """
-        from ..config.agent_configs import agent_config_manager
+        try:
+            # Try to get the configured prompt - avoid circular import
+            if hasattr(self, 'agent_config') and self.agent_config:
+                config_prompt = getattr(self.agent_config, 'system_prompt', None)
+                if config_prompt:
+                    return config_prompt
+        except Exception as e:
+            self.logger.warning(f"Failed to get configured system prompt: {e}")
         
-        config_prompt = agent_config_manager.get_system_prompt(self.agent_type)
-        if config_prompt:
-            return config_prompt
-        else:
-            # Fallback to default if no configuration found
-            return await self._get_default_system_prompt()
+        # Fallback to default if no configuration found
+        return await self._get_default_system_prompt()
     
     @abstractmethod
     async def _get_default_system_prompt(self) -> str:
@@ -406,10 +413,10 @@ Provide a detailed, actionable response with clear reasoning and specific implem
         Raises:
             AgentError: If task processing fails
         """
-        from ..models.agent_models import AgentError
+        from ..core.exceptions import AgentError
         
         task_id = task_context.task_id
-        correlation_id = task_context.correlation_id
+        correlation_id = task_context.metadata.get("correlation_id", str(uuid.uuid4()))
         
         with self.logger.context(
             correlation_id=correlation_id,
@@ -423,15 +430,15 @@ Provide a detailed, actionable response with clear reasoning and specific implem
                     operation="task_start",
                     metadata={
                         "task_type": task_context.task_type.value,
-                        "priority": task_context.priority.value,
-                        "requirements_count": len(task_context.requirements),
-                        "deliverables_count": len(task_context.expected_deliverables)
+                        "priority": task_context.metadata.get("priority", "normal"),
+                        "requirements_count": len(task_context.metadata.get("requirements", [])),
+                        "deliverables_count": len(task_context.metadata.get("expected_deliverables", []))
                     }
                 )
                 
                 # Update agent status
                 old_status = self.status
-                self.status = AgentStatus.PROCESSING
+                self.status = AgentStatus.BUSY
                 self.logger.info(
                     f"Agent status changed: {old_status.value} -> {self.status.value}",
                     operation="status_change",
@@ -447,8 +454,8 @@ Provide a detailed, actionable response with clear reasoning and specific implem
                     user_prompt=f"Analyze and process this task: {task_context.description}",
                     context={
                         "task": task_context.to_dict(),
-                        "requirements": task_context.requirements,
-                        "expected_deliverables": task_context.expected_deliverables,
+                        "requirements": task_context.metadata.get("requirements", []),
+                        "expected_deliverables": task_context.metadata.get("expected_deliverables", []),
                         "correlation_id": correlation_id,
                         "task_id": task_id
                     },
@@ -501,9 +508,9 @@ Provide a detailed, actionable response with clear reasoning and specific implem
                 task_result = TaskResult(
                     task_id=task_id,
                     agent_id=self.agent_id,
-                    status="error",
+                    status=TaskStatus.FAILED,
                     result=f"Failed to process task: {str(e)}",
-                    error_details=str(e)
+                    error_message=str(e)
                 )
                 # No re-raise here, finally block will handle cleanup
             
@@ -513,10 +520,10 @@ Provide a detailed, actionable response with clear reasoning and specific implem
                     del self.active_tasks[task_id]
                 
                 # Log task completion or failure
-                if 'task_result' in locals() and task_result.status == "completed":
+                if 'task_result' in locals() and task_result.status == TaskStatus.COMPLETED:
                     self.logger.info(f"Task {task_id} completed successfully by agent {self.agent_id}")
                 elif 'task_result' in locals(): # Covers error status
-                    self.logger.error(f"Task {task_id} failed for agent {self.agent_id}. Status: {task_result.status}, Error: {task_result.error_details if task_result.error_details else task_result.result}")
+                    self.logger.error(f"Task {task_id} failed for agent {self.agent_id}. Status: {task_result.status}, Error: {task_result.error_message if task_result.error_message else task_result.result}")
                 else:
                     # This case should ideally not be reached if task_result is always initialized.
                     # It implies an error before task_result could be set, even to an error state.
@@ -525,24 +532,96 @@ Provide a detailed, actionable response with clear reasoning and specific implem
                     task_result = TaskResult(
                         task_id=task_id,
                         agent_id=self.agent_id,
-                        status="error",
+                        status=TaskStatus.FAILED,
                         result="Critical error in task processing, result not generated.",
-                        error_details="task_result was not defined by the end of process_task"
+                        error_message="task_result was not defined by the end of process_task"
                     )
 
                 # Emit event for task completion/failure
                 await self.event_bus.publish(
                     topic=f"agent.{self.agent_id}.task.finished",
-                    data={
-                        "task_id": task_id,
-                        "status": task_result.status,
-                        "result_summary": task_result.result[:200] if task_result.result else "N/A", # Summary
-                        "correlation_id": correlation_id
-                    }
+                    message=AgentMessage(
+                        message_id=str(uuid.uuid4()),
+                        sender_id=self.agent_id,
+                        receiver_id="system",
+                        message_type=MessageType.NOTIFICATION,
+                        content={
+                            "task_id": task_id,
+                            "status": task_result.status.value,
+                            "result_summary": task_result.result[:200] if task_result.result else "N/A", # Summary
+                        },
+                        correlation_id=correlation_id
+                    )
                 )
                 
-                log_ctx.set_status("completed" if task_result.status == "completed" else "failed")
                 return task_result
+    
+    async def execute_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute a task using dictionary input format (for LangGraph compatibility).
+        
+        This method converts the LangGraph task format to a proper TaskContext
+        and delegates to process_task.
+        
+        Args:
+            task_data: Dictionary containing task information with keys:
+                      - description: Task description
+                      - task_type: Type of task (optional, defaults to "analysis")
+                      - priority: Task priority (optional, defaults to "normal")
+        
+        Returns:
+            Dictionary containing the task result
+        """
+        from ..models.task_models import TaskType, TaskPriority
+        
+        # Generate task ID if not provided
+        task_id = task_data.get("task_id", str(uuid.uuid4()))
+        
+        # Map string values to enum values
+        task_type_mapping = {
+            "analysis": TaskType.ANALYSIS,
+            "implementation": TaskType.IMPLEMENTATION,
+            "testing": TaskType.TESTING,
+            "documentation": TaskType.DOCUMENTATION,
+            "deployment": TaskType.DEPLOYMENT,
+            "security": TaskType.ANALYSIS,  # Map to ANALYSIS as fallback
+            "performance": TaskType.ANALYSIS,  # Map to ANALYSIS as fallback  
+            "project_development": TaskType.IMPLEMENTATION,  # Map to IMPLEMENTATION as fallback
+            "maintenance": TaskType.ANALYSIS  # Map to ANALYSIS as fallback
+        }
+        
+        # Create TaskContext from dictionary
+        task_context = TaskContext(
+            task_id=task_id,
+            description=task_data.get("description", ""),
+            task_type=task_type_mapping.get(
+                task_data.get("task_type", "analysis"), 
+                TaskType.ANALYSIS
+            ),
+            parameters=task_data.get("parameters", {}),
+            dependencies=task_data.get("dependencies", []),
+            metadata={
+                "priority": task_data.get("priority", "normal"),
+                "requirements": task_data.get("requirements", []),
+                "expected_deliverables": task_data.get("expected_deliverables", []),
+                "correlation_id": task_data.get("correlation_id", str(uuid.uuid4()))
+            }
+        )
+        
+        # Process the task using the standard method
+        task_result = await self.process_task(task_context)
+        
+        # Convert TaskResult to dictionary for LangGraph compatibility
+        return {
+            "task_id": task_result.task_id,
+            "status": task_result.status.value if hasattr(task_result.status, 'value') else str(task_result.status),
+            "result": task_result.result,
+            "deliverables": task_result.metadata.get("deliverables", []),
+            "execution_time": task_result.execution_time,
+            "agent_id": task_result.agent_id,
+            "created_at": task_result.completed_at.isoformat() if task_result.completed_at else None,
+            "error_details": task_result.error_message
+        }
     
     async def health_check(self) -> bool:
         """
