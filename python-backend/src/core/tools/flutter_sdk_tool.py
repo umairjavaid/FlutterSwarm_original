@@ -72,24 +72,18 @@ class FlutterSDKTool(BaseTool):
     
     async def get_capabilities(self) -> ToolCapabilities:
         """Get tool capabilities with dynamic examples."""
-        from ..template_engine import get_template_engine
-        
-        template_engine = get_template_engine()
-        available_templates = template_engine.list_available_templates()
-        
         return ToolCapabilities(
             operations=[
                 ToolOperation(
                     name="create_project",
-                    description="Create a new Flutter project with customizable templates",
+                    description="Create a new Flutter project based on description",
                     parameters={
                         "project_name": "string",
                         "description": "string", 
-                        "template_type": "string",
-                        "features": "array",
-                        "platforms": "array"
+                        "platforms": "array",
+                        "project_dir": "string"
                     },
-                    required_params=["project_name"],
+                    required_params=["project_name", "description"],
                     example_usage=self._generate_dynamic_examples()
                 ),
                 ToolOperation(
@@ -318,42 +312,36 @@ class FlutterSDKTool(BaseTool):
             ],
             supported_file_types=[".dart", ".yaml", ".json", ".gradle", ".xml"],
             performance_notes=[
-                "Project creation time varies based on template complexity",
+                "Project creation time varies based on platform count and dependencies",
                 "Platform addition requires network access for dependencies",
                 "Build operations can be CPU intensive"
             ]
         )
     
     def _generate_dynamic_examples(self) -> List[Dict[str, Any]]:
-        """Generate dynamic examples based on available templates."""
+        """Generate dynamic examples for project creation."""
         examples = [
             {
-                "description": "Create a basic mobile app",
+                "description": "Create a weather app",
                 "parameters": {
-                    "project_name": "my_mobile_app",
-                    "description": "A new Flutter mobile application",
-                    "template_type": "basic",
-                    "features": ["home", "settings"],
+                    "project_name": "weather_app",
+                    "description": "A weather application that shows current weather and forecasts",
                     "platforms": ["android", "ios"]
                 }
             },
             {
-                "description": "Create an e-commerce app with advanced features",
+                "description": "Create a todo list app",
                 "parameters": {
-                    "project_name": "shopping_app",
-                    "description": "E-commerce application with cart and payments",
-                    "template_type": "advanced",
-                    "features": ["authentication", "shopping_cart", "payments", "user_profile"],
+                    "project_name": "todo_app",
+                    "description": "A task management app with todo lists and reminders",
                     "platforms": ["android", "ios", "web"]
                 }
             },
             {
-                "description": "Create a productivity app",
+                "description": "Create an e-commerce app",
                 "parameters": {
-                    "project_name": "task_manager",
-                    "description": "Task management and productivity app",
-                    "template_type": "clean_architecture",
-                    "features": ["task_management", "notifications", "calendar_integration"],
+                    "project_name": "shopping_app",
+                    "description": "E-commerce application with product catalog and shopping cart",
                     "platforms": ["android", "ios"]
                 }
             }
@@ -381,15 +369,24 @@ class FlutterSDKTool(BaseTool):
         if not project_name:
             return False, "project_name is required"
         
+        description = params.get("description")
+        if not description:
+            return False, "description is required"
+        
         # Validate project name format
         import re
         if not re.match(r'^[a-z][a-z0-9_]*$', project_name):
             return False, "project_name must be lowercase with underscores only"
         
-        # Validate features if provided
-        features = params.get("features", [])
-        if features and not isinstance(features, list):
-            return False, "features must be an array"
+        # Validate platforms if provided
+        platforms = params.get("platforms", [])
+        if platforms and not isinstance(platforms, list):
+            return False, "platforms must be an array"
+        
+        supported_platforms = ["android", "ios", "web", "windows", "macos", "linux"]
+        for platform in platforms:
+            if platform not in supported_platforms:
+                return False, f"platform '{platform}' is not supported. Must be one of: {', '.join(supported_platforms)}"
         
         return True, None
     
@@ -462,89 +459,100 @@ class FlutterSDKTool(BaseTool):
             )
     
     async def _create_project_dynamic(self, params: Dict[str, Any], operation_id: Optional[str]) -> ToolResult:
-        """Create Flutter project using dynamic template system."""
-        from ..template_engine import get_template_engine, TemplateContext, ArchitecturalPattern
+        """Create Flutter project using standard Flutter commands without templates."""
+        from pathlib import Path
+        from ...config.settings import settings
         
         project_name = params["project_name"]
         description = params.get("description", f"A new Flutter project: {project_name}")
-        template_type = params.get("template_type", "basic")
-        features = params.get("features", ["home"])
         platforms = params.get("platforms", ["android", "ios"])
+        project_dir = params.get("project_dir")
         
         try:
-            # Map template type to architectural pattern
-            arch_pattern_map = {
-                "basic": ArchitecturalPattern.BASIC_PATTERN,
-                "bloc": ArchitecturalPattern.BLOC_PATTERN,
-                "clean_architecture": ArchitecturalPattern.CLEAN_ARCHITECTURE,
-                "provider": ArchitecturalPattern.PROVIDER_PATTERN,
-                "riverpod": ArchitecturalPattern.RIVERPOD_PATTERN
-            }
+            # Determine output directory - FIXED: Use correct flutter_projects directory
+            if project_dir:
+                output_dir = Path(project_dir)
+            else:
+                # Use the flutter_projects directory from the workspace root (not python-backend)
+                workspace_root = Path(__file__).parent.parent.parent.parent.parent
+                flutter_projects_dir = workspace_root / "flutter_projects"
+                output_dir = flutter_projects_dir
             
-            arch_pattern = arch_pattern_map.get(template_type, ArchitecturalPattern.BASIC_PATTERN)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            project_path = output_dir / project_name
             
-            # Create template context
-            context = TemplateContext(
-                app_name=project_name.replace('_', ' ').title(),
-                app_description=description,
-                architectural_pattern=arch_pattern,
-                features=features,
-                platform_targets=platforms
-            )
+            # Check if project already exists
+            if project_path.exists():
+                return ToolResult(
+                    status=ToolStatus.FAILURE,
+                    error_message=f"Project {project_name} already exists at {project_path}",
+                    operation_id=operation_id
+                )
             
-            # Generate project files
-            template_engine = get_template_engine()
-            project_files = template_engine.generate_project_structure(context)
+            # Create Flutter project using standard command WITHOUT templates
+            create_cmd = [self.flutter_executable, "create"]
             
-            if not project_files:
-                raise Exception("No project files generated from templates")
+            # Add platforms if specified
+            if platforms:
+                platforms_str = ",".join(platforms)
+                create_cmd.extend(["--platforms", platforms_str])
             
-            # Create Flutter project using standard command first
-            import subprocess
-            logger.debug(f"Executing Flutter create command: {self.flutter_executable} create {project_name}")
-            result = subprocess.run(
-                [self.flutter_executable, "create", project_name],
-                capture_output=True,
-                text=True,
+            # Add description
+            create_cmd.extend(["--description", description])
+            
+            # Add project name
+            create_cmd.append(project_name)
+            
+            logger.info(f"Creating Flutter project: {' '.join(create_cmd)}")
+            logger.info(f"Working directory: {output_dir}")
+            
+            # Execute flutter create command
+            result = await self._run_flutter_command(
+                create_cmd,
+                cwd=str(output_dir),
+                operation_id=operation_id,
                 timeout=120
             )
-            logger.debug(f"Flutter create command output: {result.stdout}")
-            logger.debug(f"Flutter create command error: {result.stderr}")
-            logger.debug(f"Flutter create command return code: {result.returncode}")
-
-            if result.returncode != 0:
-                raise Exception(f"Flutter create failed: {result.stderr}")
             
-            # Override with our dynamic templates
-            import os
-            from pathlib import Path
+            if result.status != ToolStatus.SUCCESS:
+                return ToolResult(
+                    status=ToolStatus.FAILURE,
+                    error_message=f"Flutter create failed: {result.error_message}",
+                    operation_id=operation_id
+                )
             
-            project_path = Path.cwd() / project_name
+            # Verify project was created
+            if not project_path.exists() or not (project_path / "pubspec.yaml").exists():
+                return ToolResult(
+                    status=ToolStatus.FAILURE,
+                    error_message=f"Project was not created successfully at {project_path}",
+                    operation_id=operation_id
+                )
             
-            for file_path, content in project_files.items():
-                full_path = project_path / file_path
-                full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_text(content, encoding='utf-8')
+            # Get project info
+            project_info = {
+                "project_path": str(project_path),
+                "project_name": project_name,
+                "description": description,
+                "platforms": platforms,
+                "pubspec_file": str(project_path / "pubspec.yaml"),
+                "main_file": str(project_path / "lib" / "main.dart"),
+                "output_directory": str(output_dir)
+            }
             
             return ToolResult(
                 status=ToolStatus.SUCCESS,
-                data={
-                    "project_path": str(project_path),
-                    "project_name": project_name,
-                    "template_type": template_type,
-                    "features": features,
-                    "platforms": platforms,
-                    "files_generated": len(project_files)
-                },
+                data=project_info,
                 metadata={
                     "flutter_version": self._get_flutter_version(),
-                    "template_engine": "dynamic"
+                    "creation_method": "standard_flutter_create_no_templates",
+                    "template_removed": True
                 },
                 operation_id=operation_id
             )
             
         except Exception as e:
-            logger.error(f"Dynamic project creation failed: {e}")
+            logger.error(f"Project creation failed: {e}")
             return ToolResult(
                 status=ToolStatus.FAILURE,
                 error_message=str(e),
@@ -1413,19 +1421,40 @@ class FlutterSDKTool(BaseTool):
         """Get comprehensive usage examples for Flutter SDK tool."""
         return [
             {
-                "title": "Create a new Flutter app",
-                "description": "Create a new Flutter application with custom organization and platforms",
+                "title": "Create a weather app",
+                "description": "Create a Flutter weather application with real-time weather data",
                 "operation": "create_project",
                 "params": {
                     "project_name": "weather_app",
-                    "output_directory": "./projects",
-                    "template": "app",
-                    "org": "com.mycompany",
-                    "description": "A beautiful weather application",
+                    "description": "A beautiful weather application with real-time data and forecasts",
                     "platforms": ["android", "ios", "web"]
                 },
-                "expected_outcome": "New Flutter project with multi-platform support",
-                "follow_up_actions": ["cd into project", "flutter pub get", "flutter run"]
+                "expected_outcome": "New Flutter weather app project ready for development",
+                "follow_up_actions": ["Implement weather API integration", "Design weather UI", "Add location services"]
+            },
+            {
+                "title": "Create a todo list app",
+                "description": "Create a Flutter todo list application with local storage",
+                "operation": "create_project",
+                "params": {
+                    "project_name": "todo_app",
+                    "description": "A productivity todo application with task management and reminders",
+                    "platforms": ["android", "ios"]
+                },
+                "expected_outcome": "New Flutter todo app project with basic structure",
+                "follow_up_actions": ["Implement task CRUD operations", "Add local database", "Design task UI"]
+            },
+            {
+                "title": "Create a chat application",
+                "description": "Create a Flutter real-time chat application",
+                "operation": "create_project",
+                "params": {
+                    "project_name": "chat_app",
+                    "description": "A real-time messaging application with Firebase integration",
+                    "platforms": ["android", "ios", "web"]
+                },
+                "expected_outcome": "New Flutter chat app project structure created",
+                "follow_up_actions": ["Set up Firebase", "Implement messaging UI", "Add real-time features"]
             },
             {
                 "title": "Build release APK",

@@ -1374,59 +1374,40 @@ class SupervisorAgent:
         }
         return capabilities_map.get(agent_role, ["general_purpose"])
     
-    def _generate_dynamic_project_files(self, project_name: str, app_description: str, features: List[str] = None) -> Dict[str, str]:
-        """Generate Flutter project files dynamically using template engine."""
-        from ..core.template_engine import get_template_engine, TemplateContext, ArchitecturalPattern
+    async def create_flutter_project_with_sdk(self, project_name: str, app_description: str, platforms: List[str] = None) -> str:
+        """Create Flutter project using Flutter SDK tool instead of templates."""
+        from ..core.tools.flutter_sdk_tool import FlutterSDKTool
         
-        if features is None:
-            features = ["home", "settings"]
+        if platforms is None:
+            platforms = ["android", "ios"]
         
-        # Create template context from user requirements
-        context = TemplateContext(
-            app_name=project_name,
-            app_description=app_description,
-            architectural_pattern=ArchitecturalPattern.BASIC_PATTERN,
-            features=features
-        )
+        # Normalize project name for Flutter
+        normalized_name = project_name.lower().replace(' ', '_').replace('-', '_')
         
-        template_engine = get_template_engine()
+        # Use the Flutter SDK tool to create the project
+        flutter_tool = FlutterSDKTool()
         
-        try:
-            project_files = template_engine.generate_project_structure(context)
-            logger.info(f"Generated {len(project_files)} files for project: {project_name}")
-            return project_files
-        except Exception as e:
-            logger.error(f"Failed to generate project files: {e}")
-            return {}
-
-    def _write_dynamic_flutter_project(self, project_name: str, app_description: str, features: List[str] = None) -> str:
-        """Write Flutter project files dynamically to the designated output directory."""
-        from ..config.settings import settings
-        
-        # Get the root project directory
-        current_dir = Path(__file__).resolve().parent.parent.parent.parent
-        output_dir = current_dir / settings.flutter.output_directory / project_name.lower().replace(' ', '_')
-        
-        # Generate project files dynamically
-        project_files = self._generate_dynamic_project_files(project_name, app_description, features)
-        
-        if not project_files:
-            logger.error("No project files generated")
-            return f"Failed to generate project files for {project_name}"
+        params = {
+            "project_name": normalized_name,
+            "description": app_description,
+            "platforms": platforms
+        }
         
         try:
-            # Create project directory structure
-            for file_path, content in project_files.items():
-                full_path = output_dir / file_path
-                full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_text(content, encoding='utf-8')
+            result = await flutter_tool.execute("create_project", params)
             
-            logger.info(f"Successfully created Flutter project: {project_name}")
-            return f"Successfully created Flutter project at {output_dir}"
-            
+            if result.status.name == "SUCCESS":
+                project_path = result.data.get("project_path", "")
+                logger.info(f"Successfully created Flutter project: {normalized_name} at {project_path}")
+                return f"Successfully created Flutter project '{normalized_name}' at {project_path}. The project is ready for development with the specified platforms: {', '.join(platforms)}."
+            else:
+                error_msg = result.error_message or "Unknown error occurred"
+                logger.error(f"Failed to create Flutter project: {error_msg}")
+                return f"Failed to create Flutter project: {error_msg}"
+                
         except Exception as e:
-            logger.error(f"Failed to write project files: {e}")
-            return f"Failed to create project: {str(e)}"
+            logger.error(f"Exception while creating Flutter project: {e}")
+            return f"Failed to create Flutter project due to exception: {str(e)}"
     
     def _write_flutter_project(self, project_name: str) -> str:
         """
