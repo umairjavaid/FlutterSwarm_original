@@ -15,7 +15,7 @@ import re
 from .base_tool import BaseTool, ToolCategory, ToolPermission # Added ToolCategory and ToolPermission
 from ...models.tool_models import (
     ToolCapability, ToolOperation, ToolResult, ToolUsageExample,
-    ToolValidation, ToolPerformanceMetrics, ToolLearningData
+    ToolValidation, ToolMetrics
 )
 from ...config import get_logger
 

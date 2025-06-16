@@ -249,7 +249,7 @@ class SupervisorAgent:
                 agent_id="architecture_agent",
                 agent_type="architecture",
                 llm_model=settings.llm.default_model,
-                capabilities=[AgentCapability.DESIGN_PATTERNS, AgentCapability.ANALYSIS],
+                capabilities=[AgentCapability.ARCHITECTURE_ANALYSIS],
                 max_concurrent_tasks=2
             )
             architecture_agent = ArchitectureAgent(
@@ -261,17 +261,25 @@ class SupervisorAgent:
             workflow.add_node("architecture_agent", self._create_agent_node(architecture_agent))
 
             # Initialize other agents
+            agent_capabilities = {
+                "testing": [AgentCapability.TESTING],
+                "security": [AgentCapability.SECURITY_ANALYSIS, AgentCapability.VULNERABILITY_SCANNING],
+                "devops": [AgentCapability.DEPLOYMENT, AgentCapability.INFRASTRUCTURE],
+                "documentation": [AgentCapability.DOCUMENTATION],
+                "performance": [AgentCapability.MONITORING]
+            }
+            
             for agent_type in ["testing", "security", "devops", "documentation", "performance"]:
                 config = AgentConfig(
                     agent_id=f"{agent_type}_agent",
                     agent_type=agent_type,
                     llm_model=settings.llm.default_model,
-                    capabilities=[AgentCapability.ANALYSIS],
+                    capabilities=agent_capabilities.get(agent_type, [AgentCapability.ORCHESTRATION]),
                     max_concurrent_tasks=2
                 )
                 
                 # Create mock agents for now (can be replaced with actual implementations)
-                mock_agent = MockAgent(agent_type, ["analysis"])
+                mock_agent = MockAgent(agent_type, [cap.value for cap in agent_capabilities.get(agent_type, [AgentCapability.ORCHESTRATION])])
                 workflow.add_node(f"{agent_type}_agent", self._create_mock_agent_node(mock_agent))
 
             logger.info(f"Added mock agent nodes for roles: {self.agent_roles}")
@@ -279,8 +287,19 @@ class SupervisorAgent:
         except ImportError as e:
             logger.warning(f"Could not import agent classes: {e}")
             # Fallback to mock agents
+            agent_capabilities = {
+                "testing": ["testing"],
+                "security": ["security_analysis", "vulnerability_scanning"],
+                "devops": ["deployment", "infrastructure"],
+                "documentation": ["documentation"],
+                "performance": ["monitoring"],
+                "architecture": ["architecture_analysis"],
+                "implementation": ["code_generation", "file_operations"]
+            }
+            
             for role in self.agent_roles:
-                mock_agent = MockAgent(role, ["analysis"])
+                capabilities = agent_capabilities.get(role, ["orchestration"])
+                mock_agent = MockAgent(role, capabilities)
                 workflow.add_node(f"{role}_agent", self._create_mock_agent_node(mock_agent))
             logger.info(f"Added mock agent nodes for roles: {self.agent_roles}")
 

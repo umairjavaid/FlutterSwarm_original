@@ -52,6 +52,12 @@ class AgentCapability(Enum):
     MONITORING = "monitoring"
     INFRASTRUCTURE = "infrastructure"
     QUALITY_ASSURANCE = "quality_assurance"
+    # Additional capabilities found in configurations
+    DESIGN_PATTERNS = "design_patterns"
+    COORDINATION = "coordination"
+    ADAPTATION = "adaptation"
+    RESOURCE_MANAGEMENT = "resource_management"
+    PROJECT_STRUCTURE = "project_structure"
 
 
 @dataclass
