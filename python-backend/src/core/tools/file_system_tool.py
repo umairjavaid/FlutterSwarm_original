@@ -1944,12 +1944,35 @@ class FileSystemTool(BaseTool):
     async def execute(self, operation: str, params: Dict[str, Any], operation_id: Optional[str] = None) -> ToolResult:
         """Execute file system operations with Flutter awareness."""
         start_time = datetime.now()
-        
         try:
-            # Load .gitignore patterns for the project
-            project_path = self._find_project_root(Path(params.get("path", ".")))
-            if project_path:
-                self.gitignore_patterns = self._load_gitignore_patterns(project_path)
-            
             if operation == "read_file":
-               
+                return await self._read_file(params)
+            elif operation == "write_file":
+                return await self._write_file(params)
+            elif operation == "create_from_template":
+                return await self._create_from_template(params)
+            elif operation == "manage_pubspec":
+                return await self._manage_pubspec(params)
+            elif operation == "optimize_assets":
+                return await self._optimize_assets(params)
+            elif operation == "create_barrel_exports":
+                return await self._create_barrel_exports(params)
+            elif operation == "batch_operation":
+                return await self._batch_operation(params)
+            elif operation == "analyze_project_structure":
+                return await self._analyze_project_structure(params)
+            elif operation == "setup_file_watcher":
+                return await self._setup_file_watcher(params)
+            elif operation == "validate_flutter_conventions":
+                return await self._validate_flutter_conventions(params)
+            else:
+                raise ValueError(f"Unknown operation: {operation}")
+        except Exception as e:
+            logger.error(f"File system tool execution failed: {e}")
+            return ToolResult(
+                tool_name=self.name,
+                operation=operation,
+                status=ToolStatus.FAILURE,
+                error_message=str(e),
+                execution_time=(datetime.now() - start_time).total_seconds()            
+            )                                                       
