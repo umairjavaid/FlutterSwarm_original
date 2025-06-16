@@ -305,14 +305,25 @@ class BaseAgent(ABC, AdvancedToolWorkflowMixin):
             f"Task:\n{user_prompt}\n"
             "If tool usage is needed, specify tool, operation, and parameters."
         )
-        # 3. Call LLM
-        response = await self.llm_client.generate(
-            prompt=full_prompt,
-            model=self.config.llm_model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            agent_id=self.agent_id
-        )
+        # 3. Call LLM with timeout
+        try:
+            response = await asyncio.wait_for(
+                self.llm_client.generate(
+                    prompt=full_prompt,
+                    model=self.config.llm_model,
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                    agent_id=self.agent_id
+                ),
+                timeout=self.config.timeout or 60  # Use config timeout or default to 60 seconds
+            )
+        except asyncio.TimeoutError:
+            self.logger.error(f"LLM task execution timed out for agent {self.agent_id}")
+            return {
+                "error": "LLM execution timeout",
+                "status": "timeout",
+                "response": "Task execution timed out"
+            }
         # 4. Parse tool usage intentions
         tool_plan = response.get("tool_plan") if isinstance(response, dict) else None
         if include_tools and tool_plan:
@@ -558,70 +569,58 @@ Provide a detailed, actionable response with clear reasoning and specific implem
     
     async def execute_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Execute a task using dictionary input format (for LangGraph compatibility).
+        Execute a task - LangGraph compatibility method.
         
-        This method converts the LangGraph task format to a proper TaskContext
-        and delegates to process_task.
+        This method provides a simple interface for LangGraph supervisor to execute tasks.
+        It converts the task_data to TaskContext and calls process_task.
         
         Args:
-            task_data: Dictionary containing task information with keys:
-                      - description: Task description
-                      - task_type: Type of task (optional, defaults to "analysis")
-                      - priority: Task priority (optional, defaults to "normal")
-        
+            task_data: Dictionary containing task information
+            
         Returns:
-            Dictionary containing the task result
+            Dictionary containing task result
         """
-        from ..models.task_models import TaskType, TaskPriority
-        
-        # Generate task ID if not provided
-        task_id = task_data.get("task_id", str(uuid.uuid4()))
-        
-        # Map string values to enum values
-        task_type_mapping = {
-            "analysis": TaskType.ANALYSIS,
-            "implementation": TaskType.IMPLEMENTATION,
-            "testing": TaskType.TESTING,
-            "documentation": TaskType.DOCUMENTATION,
-            "deployment": TaskType.DEPLOYMENT,
-            "security": TaskType.ANALYSIS,  # Map to ANALYSIS as fallback
-            "performance": TaskType.ANALYSIS,  # Map to ANALYSIS as fallback  
-            "project_development": TaskType.IMPLEMENTATION,  # Map to IMPLEMENTATION as fallback
-            "maintenance": TaskType.ANALYSIS  # Map to ANALYSIS as fallback
-        }
-        
-        # Create TaskContext from dictionary
-        task_context = TaskContext(
-            task_id=task_id,
-            description=task_data.get("description", ""),
-            task_type=task_type_mapping.get(
-                task_data.get("task_type", "analysis"), 
-                TaskType.ANALYSIS
-            ),
-            parameters=task_data.get("parameters", {}),
-            dependencies=task_data.get("dependencies", []),
-            metadata={
-                "priority": task_data.get("priority", "normal"),
-                "requirements": task_data.get("requirements", []),
-                "expected_deliverables": task_data.get("expected_deliverables", []),
-                "correlation_id": task_data.get("correlation_id", str(uuid.uuid4()))
+        try:
+            # Convert task_data to TaskContext
+            from ..models.task_models import TaskContext, TaskType
+            
+            task_context = TaskContext(
+                task_id=task_data.get("task_id", f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"),
+                description=task_data.get("description", ""),
+                task_type=TaskType.ANALYSIS,  # Default type
+                metadata={
+                    "priority": task_data.get("priority", "normal"),
+                    "correlation_id": task_data.get("correlation_id", str(uuid.uuid4())),
+                    "project_id": task_data.get("project_id", "default_project"),
+                    **task_data.get("metadata", {})
+                }
+            )
+            
+            # Process the task
+            result = await self.process_task(task_context)
+            
+            # Convert TaskResult to dict format expected by LangGraph
+            return {
+                "task_id": result.task_id,
+                "agent_id": result.agent_id,
+                "status": result.status.value if hasattr(result.status, 'value') else str(result.status),
+                "result": result.result,
+                "deliverables": getattr(result, 'deliverables', {}),
+                "metadata": getattr(result, 'metadata', {}),
+                "error_message": getattr(result, 'error_message', None)
             }
-        )
-        
-        # Process the task using the standard method
-        task_result = await self.process_task(task_context)
-        
-        # Convert TaskResult to dictionary for LangGraph compatibility
-        return {
-            "task_id": task_result.task_id,
-            "status": task_result.status.value if hasattr(task_result.status, 'value') else str(task_result.status),
-            "result": task_result.result,
-            "deliverables": task_result.metadata.get("deliverables", []),
-            "execution_time": task_result.execution_time,
-            "agent_id": task_result.agent_id,
-            "created_at": task_result.completed_at.isoformat() if task_result.completed_at else None,
-            "error_details": task_result.error_message
-        }
+            
+        except Exception as e:
+            self.logger.error(f"Error in execute_task: {e}", exc_info=True)
+            return {
+                "task_id": task_data.get("task_id", "unknown"),
+                "agent_id": self.agent_id,
+                "status": "failed",
+                "result": None,
+                "error_message": str(e),
+                "deliverables": {},
+                "metadata": {}
+            }
     
     async def health_check(self) -> bool:
         """

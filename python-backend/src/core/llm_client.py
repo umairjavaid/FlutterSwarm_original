@@ -99,7 +99,7 @@ class AnthropicProvider(BaseLLMProvider):
         self.client = AsyncAnthropic(api_key=api_key)
     
     async def generate(self, request: LLMRequest) -> LLMResponse:
-        """Generate response using Anthropic's API."""
+        """Generate response using Anthropic's API with timeout handling."""
         await self._check_rate_limit()
         
         start_time = time.time()
@@ -114,12 +114,17 @@ class AnthropicProvider(BaseLLMProvider):
             else:
                 messages.append({"role": "user", "content": request.prompt})
             
-            # Use the correct Anthropic API endpoint
-            response = await self.client.messages.create(
-                model=request.model,
-                messages=messages,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens
+            # Use asyncio.wait_for to add timeout
+            timeout = 60  # Reduced from 120 to 60 seconds to prevent hanging
+            
+            response = await asyncio.wait_for(
+                self.client.messages.create(
+                    model=request.model,
+                    messages=messages,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens
+                ),
+                timeout=timeout
             )
             
             response_time = time.time() - start_time
@@ -136,7 +141,13 @@ class AnthropicProvider(BaseLLMProvider):
                 }
             )
             
+        except asyncio.TimeoutError:
+            response_time = time.time() - start_time
+            logger.error(f"LLM request timed out after {timeout} seconds")
+            raise LLMError(f"Request timed out after {timeout} seconds")
         except Exception as e:
+            response_time = time.time() - start_time
+            logger.error(f"Anthropic API error after {response_time:.2f}s: {str(e)}")
             raise LLMError(f"Anthropic API error: {str(e)}")
 
 

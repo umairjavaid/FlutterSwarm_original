@@ -43,8 +43,12 @@ class GitTool(BaseTool):
             name="git_tool",
             description="Comprehensive Git version control operations",
             version="1.0.0",
-            capabilities=[
-                ToolCapability.VERSION_CONTROL,
+            required_permissions=[
+                ToolPermission.FILE_READ,
+                ToolPermission.FILE_WRITE,
+                ToolPermission.FILE_CREATE,
+                ToolPermission.DIRECTORY_CREATE,
+                ToolPermission.PROCESS_SPAWN
             ]
         )
         

@@ -5,6 +5,7 @@ This agent specializes in system design, project structure analysis,
 and architectural decision-making for Flutter applications.
 """
 
+import asyncio
 import json
 import uuid
 from typing import Any, Dict, List, Optional
@@ -14,7 +15,7 @@ from .base_agent import BaseAgent, AgentCapability, AgentConfig
 from ..core.event_bus import EventBus
 from ..core.memory_manager import MemoryManager
 from ..models.agent_models import AgentMessage, TaskResult
-from ..models.task_models import TaskContext
+from ..models.task_models import TaskContext, TaskType
 from ..models.project_models import (
     ProjectContext, ArchitecturePattern, PlatformTarget, 
     ProjectType, CodeMetrics
@@ -811,7 +812,19 @@ Respond with detailed JSON structure containing the complete refactoring plan.
     async def _handle_analyze_project(self, message: AgentMessage) -> None:
         """Handle project architecture analysis requests."""
         try:
-            task_context = TaskContext(**message.payload)
+            # Safely create TaskContext by filtering supported parameters
+            payload = message.payload
+            task_context = TaskContext(
+                task_id=payload.get("task_id", f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"),
+                task_type=payload.get("task_type", TaskType.ANALYSIS),
+                description=payload.get("description", ""),
+                parameters=payload.get("parameters", {}),
+                dependencies=payload.get("dependencies", []),
+                metadata={
+                    **payload.get("metadata", {}),
+                    "project_id": payload.get("project_id", "default_project")
+                }
+            )
             
             # Store the analysis request in memory
             await self.memory_manager.store_memory(
@@ -846,7 +859,19 @@ Respond with detailed JSON structure containing the complete refactoring plan.
     async def _handle_recommend_structure(self, message: AgentMessage) -> None:
         """Handle project structure recommendation requests."""
         try:
-            task_context = TaskContext(**message.payload)
+            # Safely create TaskContext by filtering supported parameters
+            payload = message.payload
+            task_context = TaskContext(
+                task_id=payload.get("task_id", f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"),
+                task_type=payload.get("task_type", TaskType.ANALYSIS),
+                description=payload.get("description", ""),
+                parameters=payload.get("parameters", {}),
+                dependencies=payload.get("dependencies", []),
+                metadata={
+                    **payload.get("metadata", {}),
+                    "project_id": payload.get("project_id", "default_project")
+                }
+            )
             result = await self._recommend_project_structure(task_context)
             
             await self.event_bus.publish(
@@ -867,7 +892,19 @@ Respond with detailed JSON structure containing the complete refactoring plan.
     async def _handle_evaluate_design(self, message: AgentMessage) -> None:
         """Handle design evaluation requests."""
         try:
-            task_context = TaskContext(**message.payload)
+            # Safely create TaskContext by filtering supported parameters
+            payload = message.payload
+            task_context = TaskContext(
+                task_id=payload.get("task_id", f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"),
+                task_type=payload.get("task_type", TaskType.ANALYSIS),
+                description=payload.get("description", ""),
+                parameters=payload.get("parameters", {}),
+                dependencies=payload.get("dependencies", []),
+                metadata={
+                    **payload.get("metadata", {}),
+                    "project_id": payload.get("project_id", "default_project")
+                }
+            )
             result = await self._evaluate_architectural_design(task_context)
             
             await self.event_bus.publish(
@@ -1164,7 +1201,7 @@ Respond with detailed JSON structure containing the complete refactoring plan.
         """
     
     async def _parse_analysis_response(self, response: str) -> Dict[str, Any]:
-        """Parse LLM analysis response into structured format."""
+        """Parse LLM analysis response into structured format with better error handling."""
         try:
             # Try to parse as JSON first
             if response.strip().startswith('{'):
@@ -1189,27 +1226,38 @@ Respond with detailed JSON structure containing the complete refactoring plan.
             }}
             """
             
-            structured_response = await self.llm_client.generate_response(
-                structure_prompt,
-                model=self.config.llm_model,
-                temperature=0.1,
-                max_tokens=2000
-            )
-            
-            return json.loads(structured_response)
+            try:
+                structured_response = await asyncio.wait_for(
+                    self.llm_client.generate_response(
+                        structure_prompt,
+                        model=self.config.llm_model,
+                        temperature=0.1,
+                        max_tokens=2000
+                    ),
+                    timeout=60  # 1 minute timeout
+                )
+                
+                return json.loads(structured_response)
+            except asyncio.TimeoutError:
+                logger.error("Architecture analysis structuring timed out")
+                return self._create_fallback_analysis_response()
             
         except Exception as e:
             logger.error(f"Error parsing analysis response: {e}")
-            return {
-                "structure_analysis": {"error": "Failed to parse analysis"},
-                "patterns_identified": [],
-                "dependencies": {},
-                "modularity_score": 5,
-                "issues": [f"Parsing error: {str(e)}"],
-                "recommendations": ["Re-run analysis with clearer input"],
-                "best_practices_compliance": 0.5,
-                "confidence": 0.3
-            }
+            return self._create_fallback_analysis_response()
+
+    def _create_fallback_analysis_response(self) -> Dict[str, Any]:
+        """Create a fallback analysis response when parsing fails."""
+        return {
+            "structure_analysis": {"error": "Failed to parse analysis"},
+            "patterns_identified": ["Unable to analyze patterns"],
+            "dependencies": {},
+            "modularity_score": 5,
+            "issues": ["Analysis parsing failed"],
+            "recommendations": ["Re-run analysis with clearer input"],
+            "best_practices_compliance": 0.5,
+            "confidence": 0.3
+        }
     
     async def _parse_structure_response(self, response: str) -> Dict[str, Any]:
         """Parse structure recommendation response."""
