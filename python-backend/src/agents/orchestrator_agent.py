@@ -20,7 +20,7 @@ from ..core.memory_manager import MemoryManager
 from ..core.llm_client import LLMClient
 from ..models.agent_models import AgentMessage, TaskResult, AgentCapabilityInfo
 from ..models.task_models import TaskContext, WorkflowDefinition, TaskType, TaskPriority, ExecutionStrategy
-
+from ..models.workflow_models import WorkflowStep, EnvironmentState, ToolAvailability, WorkflowTemplate, WorkflowStepType
 from ..models.project_models import ProjectContext
 from ..models.tool_models import (
     WorkflowFeedback, AdaptationResult, PerformanceAnalysis, WorkflowImprovement,
