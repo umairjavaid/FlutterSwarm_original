@@ -12,7 +12,7 @@ class LLMConfig:
         "claude-3-opus-20240229", 
         "claude-3-sonnet-20240229", 
         "claude-3-haiku-20240307",
-        "claude-3-5-sonnet-20240620"
+        "claude-sonnet-4-20250514"
     ]
     
     def __init__(self):
@@ -28,7 +28,7 @@ class LLMConfig:
     def get_default_model(self) -> str:
         """Get the default model based on available API keys."""
         if self.anthropic_key:
-            return "claude-3-5-sonnet-20240620"
+            return "claude-sonnet-4-20250514"
         else:
             raise ValueError("No Anthropic API key configured")
     

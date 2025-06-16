@@ -8,7 +8,7 @@ enabled: true
 model_config:
   max_retries: 3
   max_tokens: 7000
-  model: claude-3-5-sonnet-20240620
+  model: claude-sonnet-4-20250514
   provider: anthropic
   temperature: 0.3
   timeout: 700

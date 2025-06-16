@@ -27,7 +27,7 @@ _config = load_config()
 class LLMConfig:
     """LLM provider configuration."""
     anthropic_api_key: Optional[str] = None
-    default_model: str = _config.get("llm", {}).get("default_model", "claude-3-5-sonnet-20240620")
+    default_model: str = _config.get("llm", {}).get("default_model", "claude-sonnet-4-20250514")
     max_tokens: int = _config.get("llm", {}).get("max_tokens", 4000)
     temperature: float = _config.get("llm", {}).get("temperature", 0.7)
     timeout: int = _config.get("llm", {}).get("timeout", 30)

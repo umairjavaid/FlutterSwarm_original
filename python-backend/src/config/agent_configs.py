@@ -317,7 +317,7 @@ class LangGraphAgentConfigManager:
             "enabled": True,
             "model_config": {
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20240620",
+                "model": "claude-sonnet-4-20250514",
                 "temperature": 0.3,
                 "max_tokens": 3000,
                 "timeout": 300,
@@ -363,7 +363,7 @@ class LangGraphAgentConfigManager:
             "enabled": True,
             "model_config": {
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20240620",
+                "model": "claude-sonnet-4-20250514",
                 "temperature": 0.3,
                 "max_tokens": 6000,
                 "timeout": 600,
@@ -410,7 +410,7 @@ class LangGraphAgentConfigManager:
             "enabled": True,
             "model_config": {
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20240620",
+                "model": "claude-sonnet-4-20250514",
                 "temperature": 0.2,
                 "max_tokens": 8000,
                 "timeout": 900,
@@ -443,7 +443,7 @@ class LangGraphAgentConfigManager:
             "enabled": True,
             "model_config": {
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20240620",
+                "model": "claude-sonnet-4-20250514",
                 "temperature": 0.3,
                 "max_tokens": 6000,
                 "timeout": 600,
@@ -468,7 +468,7 @@ class LangGraphAgentConfigManager:
             "enabled": True,
             "model_config": {
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20240620",
+                "model": "claude-sonnet-4-20250514",
                 "temperature": 0.2,
                 "max_tokens": 7000,
                 "timeout": 800,
@@ -493,7 +493,7 @@ class LangGraphAgentConfigManager:
             "enabled": True,
             "model_config": {
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20240620",
+                "model": "claude-sonnet-4-20250514",
                 "temperature": 0.3,
                 "max_tokens": 7000,
                 "timeout": 900,
@@ -518,7 +518,7 @@ class LangGraphAgentConfigManager:
             "enabled": True,
             "model_config": {
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20240620",
+                "model": "claude-sonnet-4-20250514",
                 "temperature": 0.4,
                 "max_tokens": 8000,
                 "timeout": 600,
@@ -543,7 +543,7 @@ class LangGraphAgentConfigManager:
             "enabled": True,
             "model_config": {
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20240620",
+                "model": "claude-sonnet-4-20250514",
                 "temperature": 0.3,
                 "max_tokens": 7000,
                 "timeout": 700,
