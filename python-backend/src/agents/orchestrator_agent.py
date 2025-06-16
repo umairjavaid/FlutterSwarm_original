@@ -21,12 +21,7 @@ from ..core.llm_client import LLMClient
 from ..models.agent_models import AgentMessage, TaskResult, AgentCapabilityInfo
 from ..models.task_models import TaskContext, WorkflowDefinition, TaskType, TaskPriority, ExecutionStrategy
 
-from ..models.project_models import ProjectContext, PlatformTarget
-from ..models.workflow_models import (
-    WorkflowStep, EnvironmentState, ToolAvailability, WorkflowTemplate, 
-    ResourceRequirement, WorkflowStepType, EnvironmentIssue, EnvironmentIssueType,
-    WorkflowStatus, DeviceInfo
-)
+from ..models.project_models import ProjectContext
 from ..models.tool_models import (
     WorkflowFeedback, AdaptationResult, PerformanceAnalysis, WorkflowImprovement,
     WorkflowSession, PerformanceBottleneck, WorkflowStepResult, AgentPerformanceMetrics,

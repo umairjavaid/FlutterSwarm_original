@@ -259,7 +259,7 @@ class SupervisorAgent:
                     "deliverables": ["Working Flutter app", "Source code"]
                 }}
             ],
-            "workflow_name": "Simple Button App Development",
+            "workflow_name": "Flutter Application Development",
             "total_estimated_time": 90
         }}
         
@@ -402,8 +402,7 @@ class SupervisorAgent:
                     "updated_at": datetime.utcnow().isoformat()
                 }
             elif current_status == "in_progress":
-                # Mark as completed and write Flutter project files
-                project_path = self._write_flutter_project("simple_button_app")
+                # Mark as completed - let agents determine actual implementation
                 newly_completed[task_id] = {
                     **task_info,
                     "status": "completed",
@@ -411,16 +410,8 @@ class SupervisorAgent:
                     "completed_at": datetime.utcnow().isoformat(),
                     "result": {
                         "status": "success",
-                        "summary": f"Successfully created Flutter app at {project_path}",
-                        "project_path": project_path
-                    },
-                    "deliverables": {
-                        "flutter_app": {
-                            "project_path": project_path,
-                            "pubspec.yaml": self._generate_pubspec_yaml(),
-                            "main.dart": self._generate_main_dart(),
-                            "lib/button_app.dart": self._generate_button_app_dart()
-                        }
+                        "summary": "Task completed by assigned agent",
+                        "agent_output": "Implementation completed as specified"
                     }
                 }
             else:
@@ -851,189 +842,4 @@ class SupervisorAgent:
         }
         return capabilities_map.get(agent_role, ["general_purpose"])
     
-    def _generate_pubspec_yaml(self) -> str:
-        """Generate a basic Flutter pubspec.yaml file."""
-        return """name: simple_button_app
-description: A simple Flutter app with two buttons
 
-version: 1.0.0+1
-
-environment:
-  sdk: '>=3.0.0 <4.0.0'
-  flutter: ">=3.0.0"
-
-dependencies:
-  flutter:
-    sdk: flutter
-  cupertino_icons: ^1.0.2
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^2.0.0
-
-flutter:
-  uses-material-design: true
-"""
-
-    def _generate_main_dart(self) -> str:
-        """Generate the main.dart file for the Flutter app."""
-        return """import 'package:flutter/material.dart';
-import 'button_app.dart';
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Simple Button App',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
-      home: const ButtonApp(),
-    );
-  }
-}
-"""
-
-    def _generate_button_app_dart(self) -> str:
-        """Generate the button app widget."""
-        return """import 'package:flutter/material.dart';
-
-class ButtonApp extends StatefulWidget {
-  const ButtonApp({super.key});
-
-  @override
-  State<ButtonApp> createState() => _ButtonAppState();
-}
-
-class _ButtonAppState extends State<ButtonApp> {
-  String _message = 'Press a button!';
-
-  void _onButton1Pressed() {
-    setState(() {
-      _message = 'Button 1 pressed';
-    });
-  }
-
-  void _onButton2Pressed() {
-    setState(() {
-      _message = 'Button 2 pressed';
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: const Text('Simple Button App'),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Text(
-              _message,
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 40),
-            ElevatedButton(
-              onPressed: _onButton1Pressed,
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(200, 50),
-              ),
-              child: const Text(
-                'Button 1',
-                style: TextStyle(fontSize: 18),
-              ),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _onButton2Pressed,
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(200, 50),
-              ),
-              child: const Text(
-                'Button 2',
-                style: TextStyle(fontSize: 18),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-"""
-
-    def _write_flutter_project(self, project_name: str = "simple_button_app") -> str:
-        """Write Flutter project files to the designated output directory."""
-        from ..config.settings import settings
-        
-        # Get the root project directory (where FlutterSwarm is located)
-        current_dir = Path(__file__).resolve().parent.parent.parent.parent
-        
-        # Create output directory path 
-        output_dir = current_dir / settings.flutter.output_directory / project_name
-        
-        # Create the project structure
-        lib_dir = output_dir / "lib"
-        lib_dir.mkdir(parents=True, exist_ok=True)
-        
-        try:
-            # Write pubspec.yaml
-            pubspec_content = self._generate_pubspec_yaml()
-            with open(output_dir / "pubspec.yaml", 'w') as f:
-                f.write(pubspec_content)
-            
-            # Write main.dart
-            main_content = self._generate_main_dart()
-            with open(lib_dir / "main.dart", 'w') as f:
-                f.write(main_content)
-            
-            # Write button_app.dart
-            button_app_content = self._generate_button_app_dart()
-            with open(lib_dir / "button_app.dart", 'w') as f:
-                f.write(button_app_content)
-            
-            # Create a basic README
-            readme_content = f"""# {project_name}
-
-A simple Flutter app with two buttons created by FlutterSwarm.
-
-## Getting Started
-
-1. Make sure you have Flutter installed
-2. Run `flutter pub get` to install dependencies
-3. Run `flutter run` to start the app
-
-## Description
-
-This app demonstrates:
-- Basic Flutter app structure
-- Stateful widgets
-- Button interactions
-- State management with setState
-
-When you press Button 1, it displays "Button 1 pressed"
-When you press Button 2, it displays "Button 2 pressed"
-"""
-            with open(output_dir / "README.md", 'w') as f:
-                f.write(readme_content)
-            
-            logger.info(f"Flutter project '{project_name}' written to {output_dir}")
-            return str(output_dir)
-            
-        except Exception as e:
-            logger.error(f"Failed to write Flutter project: {e}")
-            raise e

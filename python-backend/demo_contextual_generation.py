@@ -164,217 +164,47 @@ class ContextualCodeGenerationDemo:
         print(f"🕒 Estimated Time: {plan['estimated_time']}")
 
     def demonstrate_code_generation(self, feature_request: str):
-        """Show generated code that matches project patterns."""
-        print(f"\n💻 GENERATED CODE FOR: '{feature_request}'")
+        """Show how agents would generate code that matches project patterns."""
+        print(f"\n💻 CODE GENERATION CAPABILITIES FOR: '{feature_request}'")
         print("=" * 50)
         
-        # Generate code following detected patterns
-        bloc_code = '''
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:equatable/equatable.dart';
-
-// Following project's BLoC pattern detected in auth and home features
-
-// Events
-abstract class ProfileEvent extends Equatable {
-  @override
-  List<Object> get props => [];
-}
-
-class LoadProfile extends ProfileEvent {}
-
-class UpdateProfile extends ProfileEvent {
-  final String name;
-  final String email;
-  
-  UpdateProfile({required this.name, required this.email});
-  
-  @override
-  List<Object> get props => [name, email];
-}
-
-// States
-abstract class ProfileState extends Equatable {
-  @override
-  List<Object> get props => [];
-}
-
-class ProfileInitial extends ProfileState {}
-
-class ProfileLoading extends ProfileState {}
-
-class ProfileLoaded extends ProfileState {
-  final String name;
-  final String email;
-  final String? avatarUrl;
-  
-  ProfileLoaded({
-    required this.name,
-    required this.email,
-    this.avatarUrl
-  });
-  
-  @override
-  List<Object?> get props => [name, email, avatarUrl];
-}
-
-class ProfileError extends ProfileState {
-  final String message;
-  
-  ProfileError(this.message);
-  
-  @override
-  List<Object> get props => [message];
-}
-
-// BLoC
-class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
-  ProfileBloc() : super(ProfileInitial()) {
-    on<LoadProfile>(_onLoadProfile);
-    on<UpdateProfile>(_onUpdateProfile);
-  }
-  
-  void _onLoadProfile(LoadProfile event, Emitter<ProfileState> emit) async {
-    emit(ProfileLoading());
-    try {
-      // Load profile logic here
-      emit(ProfileLoaded(
-        name: 'John Doe',
-        email: 'john@example.com'
-      ));
-    } catch (e) {
-      emit(ProfileError('Failed to load profile'));
-    }
-  }
-  
-  void _onUpdateProfile(UpdateProfile event, Emitter<ProfileState> emit) async {
-    emit(ProfileLoading());
-    try {
-      // Update profile logic here
-      emit(ProfileLoaded(
-        name: event.name,
-        email: event.email
-      ));
-    } catch (e) {
-      emit(ProfileError('Failed to update profile'));
-    }
-  }
-}
-'''
+        print("🎯 Generation Strategy:")
+        print("  • Analyze existing project patterns")
+        print("  • Follow detected architectural conventions")
+        print("  • Generate consistent code structure")
+        print("  • Maintain project-specific naming patterns")
+        print("  • Use established dependencies and imports")
         
-        screen_code = '''
-import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import '../../../shared/widgets/custom_button.dart';
-import 'profile_bloc.dart';
-
-// Following project's screen widget pattern detected in auth and home
-
-class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (context) => ProfileBloc()..add(LoadProfile()),
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Profile'),
-          // Following project's AppBar pattern
-        ),
-        body: BlocBuilder<ProfileBloc, ProfileState>(
-          builder: (context, state) {
-            if (state is ProfileLoading) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            
-            if (state is ProfileError) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      state.message,
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                    const SizedBox(height: 16),
-                    CustomButton(
-                      text: 'Retry',
-                      onPressed: () => context.read<ProfileBloc>().add(LoadProfile()),
-                    ),
-                  ],
-                ),
-              );
-            }
-            
-            if (state is ProfileLoaded) {
-              return Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    // Avatar section
-                    CircleAvatar(
-                      radius: 50,
-                      backgroundImage: state.avatarUrl != null
-                          ? CachedNetworkImageProvider(state.avatarUrl!)
-                          : null,
-                      child: state.avatarUrl == null
-                          ? const Icon(Icons.person, size: 50)
-                          : null,
-                    ),
-                    const SizedBox(height: 24),
-                    
-                    // Name
-                    Text(
-                      state.name,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 8),
-                    
-                    // Email
-                    Text(
-                      state.email,
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                    const SizedBox(height: 32),
-                    
-                    // Actions using project's custom button
-                    CustomButton(
-                      text: 'Edit Profile',
-                      onPressed: () {
-                        // Navigate to edit screen
-                      },
-                    ),
-                  ],
-                ),
-              );
-            }
-            
-            return const SizedBox.shrink();
-          },
-        ),
-      ),
-    );
-  }
-}
-'''
+        print(f"\n📋 Code Templates Available:")
+        print("  • BLoC pattern implementation")
+        print("  • Screen/Widget structure")
+        print("  • Repository pattern")
+        print("  • Model classes with serialization")
+        print("  • Test file generation")
         
-        print("📄 Generated BLoC (lib/features/profile/profile_bloc.dart):")
-        print("```dart")
-        print(bloc_code.strip())
-        print("```")
+        print(f"\n🔧 Integration Points:")
+        print("  • Automatic import generation")
+        print("  • Consistent file organization")
+        print("  • Pattern-aware code structure")
+        print("  • Type-safe implementations")
         
-        print("\n📄 Generated Screen (lib/features/profile/profile_screen.dart):")
-        print("```dart")
-        print(screen_code.strip())
-        print("```")
+        print(f"\n✨ The Implementation Agent will generate:")
+        print("  • Complete, working Flutter code")
+        print("  • Following your project's established patterns")
+        print("  • With proper error handling and documentation")
+        print("  • Ready for immediate integration")
+
+        print("\n📄 Example Generated Files (conceptual preview):")
+        print("  • lib/features/profile/profile_bloc.dart - BLoC pattern implementation")
+        print("  • lib/features/profile/profile_screen.dart - Screen widget with navigation")
+        print("  • lib/features/profile/profile_repository.dart - Data layer abstraction")
+        print("  • test/features/profile/profile_bloc_test.dart - Comprehensive unit tests")
         
-        print("\n✨ Code Generation Features Demonstrated:")
+        print("\n✨ Code Generation Features:")
         print("  • Follows detected BLoC pattern from existing features")
         print("  • Uses same naming conventions (snake_case files)")
         print("  • Imports organized following project pattern")
-        print("  • Reuses existing custom widgets (CustomButton)")
+        print("  • Reuses existing custom widgets and patterns")
         print("  • Follows same error handling patterns")
         print("  • Uses project's theme system")
         print("  • Matches existing code structure and style")
