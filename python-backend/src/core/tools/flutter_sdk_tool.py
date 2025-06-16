@@ -46,7 +46,7 @@ class FlutterSDKTool(BaseTool):
             name="flutter_sdk",
             description="Flutter SDK operations wrapper for project management and development.",
             version="2.0.0",
-            category=ToolCategory.DEVELOPMENT_TOOLS,
+            category=ToolCategory.DEVELOPMENT,
             required_permissions=[
                 ToolPermission.PROCESS_EXECUTION,
                 ToolPermission.FILE_WRITE,
@@ -59,12 +59,16 @@ class FlutterSDKTool(BaseTool):
     def _find_flutter_executable(self) -> Optional[str]:
         """Find Flutter executable in system PATH."""
         import shutil
-        return shutil.which("flutter")
+        flutter_path = shutil.which("flutter")
+        logger.debug(f"Flutter executable found at: {flutter_path}")
+        return flutter_path
     
     def _find_dart_executable(self) -> Optional[str]:
         """Find Dart executable in system PATH."""
         import shutil
-        return shutil.which("dart")
+        dart_path = shutil.which("dart")
+        logger.debug(f"Dart executable found at: {dart_path}")
+        return dart_path
     
     async def get_capabilities(self) -> ToolCapabilities:
         """Get tool capabilities with dynamic examples."""
@@ -504,13 +508,17 @@ class FlutterSDKTool(BaseTool):
             
             # Create Flutter project using standard command first
             import subprocess
+            logger.debug(f"Executing Flutter create command: {self.flutter_executable} create {project_name}")
             result = subprocess.run(
                 [self.flutter_executable, "create", project_name],
                 capture_output=True,
                 text=True,
                 timeout=120
             )
-            
+            logger.debug(f"Flutter create command output: {result.stdout}")
+            logger.debug(f"Flutter create command error: {result.stderr}")
+            logger.debug(f"Flutter create command return code: {result.returncode}")
+
             if result.returncode != 0:
                 raise Exception(f"Flutter create failed: {result.stderr}")
             
