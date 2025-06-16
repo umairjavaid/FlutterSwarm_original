@@ -14,7 +14,7 @@ from datetime import datetime
 from .base_agent import BaseAgent, AgentCapability, AgentConfig
 from ..core.event_bus import EventBus
 from ..core.memory_manager import MemoryManager
-from ..models.agent_models import AgentMessage, TaskResult
+from ..models.agent_models import AgentMessage, TaskResult, MessageType # Added MessageType
 from ..models.task_models import TaskContext, TaskType
 from ..models.project_models import (
     ProjectContext, ArchitecturePattern, PlatformTarget, 
@@ -57,7 +57,7 @@ class ArchitectureAgent(BaseAgent):
             llm_model=config.llm_model or "gpt-4",
             temperature=0.3,  # Lower temperature for consistent architectural decisions
             max_tokens=6000,
-            timeout=600,  # Longer timeout for complex architecture analysis
+            timeout=900,  # Increased from 600 to 900 seconds (15 minutes)
             metadata=config.metadata
         )
         
@@ -895,7 +895,7 @@ Respond with detailed JSON structure containing the complete refactoring plan.
             # Safely create TaskContext by filtering supported parameters
             payload = message.payload
             task_context = TaskContext(
-                task_id=payload.get("task_id", f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"),
+                task_id=payload.get("task_id", f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S%f')}"), # Added %f for microseconds
                 task_type=payload.get("task_type", TaskType.ANALYSIS),
                 description=payload.get("description", ""),
                 parameters=payload.get("parameters", {}),
@@ -908,18 +908,17 @@ Respond with detailed JSON structure containing the complete refactoring plan.
             result = await self._evaluate_architectural_design(task_context)
             
             await self.event_bus.publish(
-                f"architecture.design_evaluated.{task_context.task_id}",
+                "architecture_agent",
                 AgentMessage(
-                    sender_id=self.agent_id,
-                    recipient_id=message.sender_id,
-                    message_type="task_result",
-                    payload=result.dict(),
-                    correlation_id=message.correlation_id
+                    message_id=f"msg_{datetime.utcnow().strftime('%Y%m%d_%H%M%S%f')}",
+                    agent_id=self.agent_id,
+                    message_type=MessageType.TASK_RESULT,
+                    payload=result.to_dict(),
+                    timestamp=datetime.utcnow()
                 )
             )
-            
         except Exception as e:
-            logger.error(f"Error handling design evaluation: {e}")
+            logger.error(f"Error handling design evaluation: {e}", exc_info=True)
             await self._send_error_response(message, str(e))
     
     async def _analyze_project_architecture(self, task_context: TaskContext) -> TaskResult:
