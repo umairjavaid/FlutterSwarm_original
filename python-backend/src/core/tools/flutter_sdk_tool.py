@@ -423,9 +423,7 @@ class FlutterSDKTool(BaseTool):
         is_valid, error_msg = await self.validate_params(operation, params)
         if not is_valid:
             return ToolResult(
-                tool_name=self.name,
-                operation=operation,
-                status=ToolStatus.FAILED,
+                status=ToolStatus.FAILURE,  # Fixed enum name
                 error_message=error_msg,
                 operation_id=operation_id
             )
@@ -451,19 +449,14 @@ class FlutterSDKTool(BaseTool):
                 return await self._doctor(params, operation_id)
             else:
                 return ToolResult(
-                    tool_name=self.name,
-                    operation=operation,
-                    status=ToolStatus.FAILED,
+                    status=ToolStatus.FAILURE,
                     error_message=f"Unknown operation: {operation}",
                     operation_id=operation_id
                 )
-        
         except Exception as e:
             logger.error(f"Flutter SDK operation failed: {e}")
             return ToolResult(
-                tool_name=self.name,
-                operation=operation,
-                status=ToolStatus.FAILED,
+                status=ToolStatus.FAILURE,
                 error_message=str(e),
                 operation_id=operation_id
             )
@@ -534,8 +527,6 @@ class FlutterSDKTool(BaseTool):
                 full_path.write_text(content, encoding='utf-8')
             
             return ToolResult(
-                tool_name=self.name,
-                operation="create_project",
                 status=ToolStatus.SUCCESS,
                 data={
                     "project_path": str(project_path),
@@ -555,9 +546,7 @@ class FlutterSDKTool(BaseTool):
         except Exception as e:
             logger.error(f"Dynamic project creation failed: {e}")
             return ToolResult(
-                tool_name=self.name,
-                operation="create_project",
-                status=ToolStatus.FAILED,
+                status=ToolStatus.FAILURE,
                 error_message=str(e),
                 operation_id=operation_id
             )
@@ -1119,7 +1108,6 @@ class FlutterSDKTool(BaseTool):
                 status = ToolStatus.FAILURE
             
             result = ToolResult(
-                operation=cmd[1] if len(cmd) > 1 else "flutter_command",
                 status=status,
                 data={
                     "stdout": stdout_str,

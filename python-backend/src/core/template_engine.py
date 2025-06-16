@@ -106,7 +106,7 @@ class TemplateEngine:
         
         def dart_string_literal(text: str) -> str:
             """Convert text to Dart string literal."""
-            return f"'{text.replace('\'', '\\\'')}'"
+            return "'" + text.replace("'", "\\'") + "'"
         
         self.env.filters['snake_case'] = snake_case
         self.env.filters['pascal_case'] = pascal_case
