@@ -672,6 +672,114 @@ Provide detailed, accurate analysis that captures both explicit and implicit pat
                 "implementation_notes": []
             }
 
+    async def _generate_code(
+        self,
+        task_context: TaskContext,
+        llm_analysis: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate code files based on task requirements."""
+        logger.info(f"Generating code for task: {task_context.task_id}")
+        
+        try:
+            # Create prompt for code generation
+            generation_prompt = f"""
+            Generate Flutter code files for this task: {task_context.description}
+            
+            Requirements: {', '.join(task_context.requirements)}
+            Expected deliverables: {', '.join(task_context.expected_deliverables)}
+            
+            You need to create actual working Flutter code files. 
+            Respond with a JSON object containing:
+            {{
+                "files": {{
+                    "file_path": {{
+                        "content": "actual dart code",
+                        "description": "what this file does"
+                    }}
+                }},
+                "instructions": ["step by step instructions"],
+                "dependencies": ["required packages"]
+            }}
+            
+            Focus on creating functional, compilable Flutter code that follows best practices.
+            """
+            
+            # Get LLM response for code structure
+            code_plan = await self.execute_llm_task(
+                user_prompt=generation_prompt,
+                context={
+                    "task": task_context.to_dict(),
+                    "patterns": self.flutter_patterns
+                },
+                structured_output=True
+            )
+            
+            # Actually create the files using the file system tool
+            files_created = {}
+            if code_plan and "files" in code_plan:
+                # Get the file system tool
+                file_system_tool = await self._get_file_system_tool()
+                if file_system_tool:
+                    for file_path, file_data in code_plan["files"].items():
+                        try:
+                            # Use tool to write the file
+                            result = await self.use_tool(
+                                tool=file_system_tool,
+                                operation="write_file",
+                                parameters={
+                                    "path": file_path,
+                                    "content": file_data.get("content", ""),
+                                    "create_backup": True
+                                }
+                            )
+                            
+                            if result.status.value == "success":
+                                files_created[file_path] = {
+                                    "status": "created",
+                                    "description": file_data.get("description", "")
+                                }
+                                logger.info(f"Successfully created file: {file_path}")
+                            else:
+                                logger.error(f"Failed to create file {file_path}: {result.error_message}")
+                                files_created[file_path] = {
+                                    "status": "failed",
+                                    "error": result.error_message
+                                }
+                        except Exception as e:
+                            logger.error(f"Exception creating file {file_path}: {e}")
+                            files_created[file_path] = {
+                                "status": "error",
+                                "error": str(e)
+                            }
+                else:
+                    logger.error("File system tool not available")
+            
+            return {
+                "code_files": files_created,
+                "implementation_notes": code_plan.get("instructions", []),
+                "dependencies": code_plan.get("dependencies", []),
+                "total_files": len(files_created)
+            }
+            
+        except Exception as e:
+            logger.error(f"Code generation failed: {e}")
+            return {
+                "error": str(e),
+                "code_files": {},
+                "implementation_notes": [f"Code generation failed: {str(e)}"]
+            }
+
+    async def _get_file_system_tool(self):
+        """Get the file system tool from available tools."""
+        try:
+            if not hasattr(self, 'available_tools') or not self.available_tools:
+                await self.discover_available_tools()
+            
+            return self.available_tools.get('file_system')
+        except Exception as e:
+            logger.error(f"Failed to get file system tool: {e}")
+            return None
+
     async def _implement_feature(
         self,
         task_context: TaskContext,
@@ -692,13 +800,50 @@ Provide detailed, accurate analysis that captures both explicit and implicit pat
             structured_output=True
         )
         
+        # Actually create the files using the file system tool
+        files_created = {}
+        if implementation_result and "files" in implementation_result:
+            file_system_tool = await self._get_file_system_tool()
+            if file_system_tool:
+                for file_path, file_data in implementation_result["files"].items():
+                    try:
+                        # Use tool to write the file
+                        result = await self.use_tool(
+                            tool=file_system_tool,
+                            operation="write_file",
+                            parameters={
+                                "path": file_path,
+                                "content": file_data.get("content", ""),
+                                "create_backup": True
+                            }
+                        )
+                        
+                        if result.status.value == "success":
+                            files_created[file_path] = {
+                                "status": "created",
+                                "description": file_data.get("description", "")
+                            }
+                            logger.info(f"Successfully created feature file: {file_path}")
+                        else:
+                            logger.error(f"Failed to create feature file {file_path}: {result.error_message}")
+                            files_created[file_path] = {
+                                "status": "failed",
+                                "error": result.error_message
+                            }
+                    except Exception as e:
+                        logger.error(f"Exception creating feature file {file_path}: {e}")
+                        files_created[file_path] = {
+                            "status": "error",
+                            "error": str(e)
+                        }
+        
         # Store implementation details in memory
         await self.memory_manager.store_memory(
             content=f"Feature implementation: {json.dumps(implementation_result)}",
             metadata={
                 "type": "feature_implementation",
                 "feature_name": task_context.metadata.get('feature_name'),
-                "files_generated": len(implementation_result.get('files', {}))
+                "files_generated": len(files_created)
             },
             correlation_id=task_context.correlation_id,
             importance=0.9,
@@ -707,12 +852,110 @@ Provide detailed, accurate analysis that captures both explicit and implicit pat
         
         return {
             "implementation_result": implementation_result,
-            "code_files": implementation_result.get("files", {}),
+            "code_files": files_created,
             "dependencies": implementation_result.get("dependencies", []),
             "setup_instructions": implementation_result.get("setup_instructions", []),
             "testing_files": implementation_result.get("test_files", {}),
-            "implementation_notes": implementation_result.get("notes", [])
+            "implementation_notes": implementation_result.get("notes", []),
+            "files_created": len(files_created)
         }
+
+    async def _process_implementation_request(
+        self,
+        task_context: TaskContext,
+        llm_analysis: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Process generic implementation requests."""
+        logger.info(f"Processing implementation request for task: {task_context.task_id}")
+        
+        try:
+            # Create prompt for implementation
+            implementation_prompt = f"""
+            Process this implementation request: {task_context.description}
+            
+            Requirements: {', '.join(task_context.requirements)}
+            Expected deliverables: {', '.join(task_context.expected_deliverables)}
+            
+            Create actual Flutter code files based on the request.
+            Respond with a JSON object containing:
+            {{
+                "files": {{
+                    "file_path": {{
+                        "content": "actual dart code",
+                        "description": "what this file does"
+                    }}
+                }},
+                "implementation_notes": ["step by step notes"],
+                "dependencies": ["required packages"],
+                "next_steps": ["what to do next"]
+            }}
+            
+            Generate complete, working Flutter code that addresses the implementation request.
+            """
+            
+            # Get LLM response for implementation plan
+            implementation_plan = await self.execute_llm_task(
+                user_prompt=implementation_prompt,
+                context={
+                    "task": task_context.to_dict(),
+                    "patterns": self.flutter_patterns,
+                    "templates": self.code_templates
+                },
+                structured_output=True
+            )
+            
+            # Actually create the files using the file system tool
+            files_created = {}
+            if implementation_plan and "files" in implementation_plan:
+                file_system_tool = await self._get_file_system_tool()
+                if file_system_tool:
+                    for file_path, file_data in implementation_plan["files"].items():
+                        try:
+                            # Use tool to write the file
+                            result = await self.use_tool(
+                                tool=file_system_tool,
+                                operation="write_file",
+                                parameters={
+                                    "path": file_path,
+                                    "content": file_data.get("content", ""),
+                                    "create_backup": True
+                                }
+                            )
+                            
+                            if result.status.value == "success":
+                                files_created[file_path] = {
+                                    "status": "created",
+                                    "description": file_data.get("description", "")
+                                }
+                                logger.info(f"Successfully created implementation file: {file_path}")
+                            else:
+                                logger.error(f"Failed to create implementation file {file_path}: {result.error_message}")
+                                files_created[file_path] = {
+                                    "status": "failed",
+                                    "error": result.error_message
+                                }
+                        except Exception as e:
+                            logger.error(f"Exception creating implementation file {file_path}: {e}")
+                            files_created[file_path] = {
+                                "status": "error",
+                                "error": str(e)
+                            }
+            
+            return {
+                "code_files": files_created,
+                "implementation_notes": implementation_plan.get("implementation_notes", []),
+                "dependencies": implementation_plan.get("dependencies", []),
+                "next_steps": implementation_plan.get("next_steps", []),
+                "total_files": len(files_created)
+            }
+            
+        except Exception as e:
+            logger.error(f"Implementation request processing failed: {e}")
+            return {
+                "error": str(e),
+                "code_files": {},
+                "implementation_notes": [f"Implementation processing failed: {str(e)}"]
+            }
 
     async def _implement_ui(
         self,
@@ -734,13 +977,57 @@ Provide detailed, accurate analysis that captures both explicit and implicit pat
             structured_output=True
         )
         
+        # Actually create the UI files using the file system tool
+        files_created = {}
+        all_files = {}
+        if ui_implementation:
+            all_files.update(ui_implementation.get("widgets", {}))
+            all_files.update(ui_implementation.get("screens", {}))
+            all_files.update(ui_implementation.get("styles", {}))
+            
+            if all_files:
+                file_system_tool = await self._get_file_system_tool()
+                if file_system_tool:
+                    for file_path, file_data in all_files.items():
+                        try:
+                            # Use tool to write the file
+                            result = await self.use_tool(
+                                tool=file_system_tool,
+                                operation="write_file",
+                                parameters={
+                                    "path": file_path,
+                                    "content": file_data.get("content", ""),
+                                    "create_backup": True
+                                }
+                            )
+                            
+                            if result.status.value == "success":
+                                files_created[file_path] = {
+                                    "status": "created",
+                                    "description": file_data.get("description", "")
+                                }
+                                logger.info(f"Successfully created UI file: {file_path}")
+                            else:
+                                logger.error(f"Failed to create UI file {file_path}: {result.error_message}")
+                                files_created[file_path] = {
+                                    "status": "failed",
+                                    "error": result.error_message
+                                }
+                        except Exception as e:
+                            logger.error(f"Exception creating UI file {file_path}: {e}")
+                            files_created[file_path] = {
+                                "status": "error",
+                                "error": str(e)
+                            }
+        
         # Store UI implementation
         await self.memory_manager.store_memory(
             content=f"UI implementation: {json.dumps(ui_implementation)}",
             metadata={
                 "type": "ui_implementation",
                 "components": ui_implementation.get('components', []),
-                "screens": ui_implementation.get('screens', [])
+                "screens": ui_implementation.get('screens', []),
+                "files_created": len(files_created)
             },
             correlation_id=task_context.correlation_id,
             importance=0.8,
@@ -749,11 +1036,13 @@ Provide detailed, accurate analysis that captures both explicit and implicit pat
         
         return {
             "ui_implementation": ui_implementation,
+            "code_files": files_created,
             "widget_files": ui_implementation.get("widgets", {}),
             "screen_files": ui_implementation.get("screens", {}),
             "style_files": ui_implementation.get("styles", {}),
             "assets": ui_implementation.get("assets", []),
-            "responsive_breakpoints": ui_implementation.get("breakpoints", {})
+            "responsive_breakpoints": ui_implementation.get("breakpoints", {}),
+            "files_created": len(files_created)
         }
 
     # Template methods for code generation
