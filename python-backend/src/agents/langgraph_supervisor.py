@@ -57,8 +57,12 @@ class SupervisorAgent:
         self.agent_id = "supervisor"
         self.agent_roles = [role.value for role in AgentRole if role != AgentRole.SUPERVISOR]
         
-        # Initialize LLM
+        # Initialize LLM (LangChain for supervisor workflow)
         self.llm = self._create_llm()
+        
+        # Initialize FlutterSwarm LLM client for agents
+        from ..core.llm_client import LLMClient
+        self.flutterswarm_llm = LLMClient()
         
         # Create checkpointer
         self.checkpointer = create_checkpointer(
@@ -1036,7 +1040,7 @@ class SupervisorAgent:
             
             impl_agent = ImplementationAgent(
                 config=config,
-                llm_client=self.llm,
+                llm_client=self.flutterswarm_llm,
                 memory_manager=memory_manager,
                 event_bus=self.event_bus
             )

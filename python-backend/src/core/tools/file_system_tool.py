@@ -243,6 +243,122 @@ class {class_name}RepositoryImpl implements {class_name}Repository {{
 }}'''
         }
 
+    async def get_usage_examples(self) -> List[Dict[str, Any]]:
+        """Provide example usage scenarios for agent learning."""
+        return [
+            {
+                "scenario": "Create a new Flutter widget with test",
+                "operation": "create_from_template",
+                "context": "Creating a reusable widget component",
+                "parameters": {
+                    "template": "widget",
+                    "path": "lib/widgets/custom_button.dart",
+                    "class_name": "CustomButton",
+                    "create_test": True
+                },
+                "expected_outcome": "Widget file created with corresponding test file",
+                "learning_notes": "Use 'widget' template for stateless components"
+            },
+            {
+                "scenario": "Read and analyze imports in main.dart",
+                "operation": "read_file",
+                "context": "Understanding app entry point structure",
+                "parameters": {
+                    "path": "lib/main.dart",
+                    "analyze_imports": True
+                },
+                "expected_outcome": "File content with import analysis and optimization suggestions",
+                "learning_notes": "analyze_imports=True provides import optimization recommendations"
+            },
+            {
+                "scenario": "Add a new dependency to pubspec.yaml",
+                "operation": "manage_pubspec",
+                "context": "Adding HTTP client to Flutter project",
+                "parameters": {
+                    "action": "add_dependency",
+                    "package_name": "http",
+                    "version": "^0.13.5"
+                },
+                "expected_outcome": "Dependency added to pubspec.yaml with backup created",
+                "learning_notes": "Always creates backup before modifying pubspec.yaml"
+            },
+            {
+                "scenario": "Optimize app icons for multiple resolutions",
+                "operation": "optimize_assets",
+                "context": "Preparing app icons for different screen densities",
+                "parameters": {
+                    "asset_path": "assets/images/app_icon.png",
+                    "target_sizes": [[72, 72], [96, 96], [144, 144], [192, 192]],
+                    "update_pubspec": True
+                },
+                "expected_outcome": "Multiple resolution versions created and pubspec updated",
+                "learning_notes": "Automatically generates multiple resolutions for Flutter assets"
+            },
+            {
+                "scenario": "Create barrel exports for better organization",
+                "operation": "create_barrel_exports",
+                "context": "Organizing widget exports in lib/widgets",
+                "parameters": {
+                    "directory": "lib/widgets",
+                    "recursive": False,
+                    "exclude_private": True
+                },
+                "expected_outcome": "index.dart file created with exports for all public widgets",
+                "learning_notes": "Barrel exports simplify imports in large projects"
+            },
+            {
+                "scenario": "Analyze project structure for Flutter best practices",
+                "operation": "analyze_project_structure",
+                "context": "Auditing project organization and conventions",
+                "parameters": {
+                    "project_path": ".",
+                    "deep_analysis": True,
+                    "check_conventions": True
+                },
+                "expected_outcome": "Detailed report with structure analysis and improvement suggestions",
+                "learning_notes": "deep_analysis=True provides comprehensive insights including import analysis"
+            },
+            {
+                "scenario": "Batch refactor multiple files safely",
+                "operation": "batch_operation",
+                "context": "Renaming a widget across multiple files",
+                "parameters": {
+                    "operations": [
+                        {
+                            "operation": "write_file",
+                            "params": {
+                                "path": "lib/widgets/old_widget.dart",
+                                "content": "// Updated widget content"
+                            }
+                        },
+                        {
+                            "operation": "write_file", 
+                            "params": {
+                                "path": "test/widgets/old_widget_test.dart",
+                                "content": "// Updated test content"
+                            }
+                        }
+                    ],
+                    "rollback_on_error": True,
+                    "create_checkpoint": True
+                },
+                "expected_outcome": "All operations completed successfully or rolled back on error",
+                "learning_notes": "Use for atomic multi-file operations with automatic rollback"
+            },
+            {
+                "scenario": "Set up file watching for development",
+                "operation": "setup_file_watcher",
+                "context": "Monitor Dart files for changes during development",
+                "parameters": {
+                    "paths": ["lib/**/*.dart", "test/**/*.dart"],
+                    "ignore_patterns": ["**/*.g.dart", "**/*.freezed.dart"],
+                    "categorize_changes": True
+                },
+                "expected_outcome": "File watcher configured with change categorization",
+                "learning_notes": "Categorizes changes by file type (dart, assets, config, platform, test)"
+            }
+        ]
+
     async def get_capabilities(self) -> ToolCapabilities:
         """Get comprehensive file system capabilities."""
         operations = [

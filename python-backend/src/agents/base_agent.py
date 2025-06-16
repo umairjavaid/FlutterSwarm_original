@@ -298,9 +298,7 @@ class BaseAgent(ABC, AdvancedToolWorkflowMixin):
             model=self.config.llm_model,
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
-            agent_id=self.agent_id,
-            structured_output=structured_output,
-            max_retries=max_retries or self.config.max_retries
+            agent_id=self.agent_id
         )
         # 4. Parse tool usage intentions
         tool_plan = response.get("tool_plan") if isinstance(response, dict) else None

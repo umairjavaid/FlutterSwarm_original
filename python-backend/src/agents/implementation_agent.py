@@ -685,8 +685,8 @@ Provide detailed, accurate analysis that captures both explicit and implicit pat
             generation_prompt = f"""
             Generate Flutter code files for this task: {task_context.description}
             
-            Requirements: {', '.join(task_context.requirements)}
-            Expected deliverables: {', '.join(task_context.expected_deliverables)}
+            Requirements: {task_context.parameters.get('requirements', [])}
+            Expected deliverables: {task_context.parameters.get('expected_deliverables', [])}
             
             You need to create actual working Flutter code files. 
             Respond with a JSON object containing:
@@ -873,8 +873,8 @@ Provide detailed, accurate analysis that captures both explicit and implicit pat
             implementation_prompt = f"""
             Process this implementation request: {task_context.description}
             
-            Requirements: {', '.join(task_context.requirements)}
-            Expected deliverables: {', '.join(task_context.expected_deliverables)}
+            Requirements: {task_context.parameters.get('requirements', [])}
+            Expected deliverables: {task_context.parameters.get('expected_deliverables', [])}
             
             Create actual Flutter code files based on the request.
             Respond with a JSON object containing:

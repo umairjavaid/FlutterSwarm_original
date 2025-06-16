@@ -180,6 +180,24 @@ class ToolResult:
     warnings: List[str] = field(default_factory=list)
 
 
+class ToolCapability(Enum):
+    """Enumeration of tool capabilities."""
+    READ = "read"
+    WRITE = "write"
+    EXECUTE = "execute"
+    CREATE = "create"
+    DELETE = "delete"
+    MODIFY = "modify"
+    ANALYZE = "analyze"
+    VALIDATE = "validate"
+    COMPILE = "compile"
+    TEST = "test"
+    BUILD = "build"
+    DEPLOY = "deploy"
+    DEBUG = "debug"
+    MONITOR = "monitor"
+
+
 @dataclass
 class ToolCapabilities:
     """Describes tool capabilities for agent understanding."""
@@ -211,6 +229,31 @@ class ToolUsageEntry:
     context: Dict[str, Any] = field(default_factory=dict)
     outcome_quality: float = 0.0
     agent_satisfaction: float = 0.0
+
+
+@dataclass 
+class ToolUsageExample:
+    """Example of tool usage for agent learning."""
+    example_id: str = field(default_factory=lambda: str(uuid4()))
+    scenario: str = ""
+    operation: str = ""
+    context: str = ""
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    expected_outcome: str = ""
+    learning_notes: str = ""
+    difficulty_level: str = "medium"  # "easy", "medium", "hard"
+    prerequisites: List[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ToolValidation:
+    """Validation results for tool operations."""
+    is_valid: bool = False
+    error_message: Optional[str] = None
+    warnings: List[str] = field(default_factory=list)
+    suggestions: List[str] = field(default_factory=list)
+    validation_details: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
