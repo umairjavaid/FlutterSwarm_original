@@ -1082,6 +1082,11 @@ class ToolRegistry:
         try:
             # Default configurations for known tools
             default_configs = {
+                "flutter_sdk": {
+                    "timeout": 300,
+                    "retry_count": 3,
+                    "cache_enabled": True
+                },
                 "flutter_sdk_tool": {
                     "timeout": 300,
                     "retry_count": 3,
@@ -1104,6 +1109,10 @@ class ToolRegistry:
                     self.tool_configs[tool_name] = {}
                 self.tool_configs[tool_name].update(config)
                 
+            # Register flutter_sdk if not already present
+            if "flutter_sdk" not in self.tool_configs:
+                self.tool_configs["flutter_sdk"] = default_configs["flutter_sdk"]
+            
             logger.debug("Tool configurations loaded")
             
         except Exception as e:

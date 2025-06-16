@@ -6,6 +6,8 @@ and implementation of Flutter applications based on specifications.
 """
 
 import json
+
+import json
 import uuid
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -43,6 +45,38 @@ from ..models.tool_models import ToolUsagePlan, ToolOperation, TaskOutcome, Tool
 from ..config import get_logger
 
 logger = get_logger("implementation_agent")
+
+async def process_task(self, task_context):
+    try:
+        llm_response = await self.execute_llm_task(task_context)
+        if isinstance(llm_response, str):
+            try:
+                llm_response = json.loads(llm_response)
+            except Exception as parse_err:
+                logger.error(f"[IMPLEMENTATION:agent] Failed to parse LLM response as JSON: {parse_err}")
+                return TaskResult(
+                    task_id=getattr(task_context, 'task_id', None),
+                    status="failed",
+                    result={"error": f"Failed to parse LLM response: {parse_err}", "raw_response": llm_response},
+                    agent_id=self.agent_id,
+                    timestamp=datetime.utcnow().isoformat()
+                )
+        return TaskResult(
+            task_id=getattr(task_context, 'task_id', None),
+            status="completed",
+            result=llm_response,
+            agent_id=self.agent_id,
+            timestamp=datetime.utcnow().isoformat()
+        )
+    except Exception as e:
+        logger.error(f"[IMPLEMENTATION:agent] LLM or processing error: {e}")
+        return TaskResult(
+            task_id=getattr(task_context, 'task_id', None),
+            status="failed",
+            result={"error": str(e)},
+            agent_id=self.agent_id,
+            timestamp=datetime.utcnow().isoformat()
+        )
 
 
 class ImplementationAgent(BaseAgent):

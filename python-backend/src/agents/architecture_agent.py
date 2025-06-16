@@ -1322,26 +1322,36 @@ Respond with detailed JSON structure containing the complete refactoring plan.
             logger.error(f"Error parsing evaluation response: {e}")
             return {"overall_score": 5.0, "error": str(e), "confidence": 0.1}
     
-    def _format_memories_for_prompt(self, memories: List[Dict[str, Any]]) -> str:
-        """Format memory entries for inclusion in LLM prompts."""
-        if not memories:
-            return "No previous similar cases found."
-        
-        formatted = []
-        for memory in memories[:3]:  # Limit to most relevant 3
-            formatted.append(f"- {memory.get('key', 'Unknown')}: {memory.get('content', {})}")
-        
-        return "\n".join(formatted)
-    
-    async def _send_error_response(self, original_message: AgentMessage, error: str) -> None:
-        """Send error response back to requester."""
-        await self.event_bus.publish(
-            f"architecture.error.{original_message.correlation_id}",
-            AgentMessage(
-                sender_id=self.agent_id,
-                recipient_id=original_message.sender_id,
-                message_type="error",
-                payload={"error": error},
-                correlation_id=original_message.correlation_id
+    async def process_task(self, task_context):
+        try:
+            # Pass both user_prompt and context to execute_llm_task
+            llm_response = await self.execute_llm_task(
+                getattr(task_context, 'description', ''),
+                context=getattr(task_context, 'context', {})
             )
-        )
+            # Ensure llm_response is a dict
+            if isinstance(llm_response, str):
+                try:
+                    llm_response = json.loads(llm_response)
+                except Exception as parse_err:
+                    logger.error(f"[ARCHITECTURE:agent] Failed to parse LLM response as JSON: {parse_err}")
+                    return TaskResult(
+                        task_id=getattr(task_context, 'task_id', None),
+                        status="failed",
+                        result={"error": f"Failed to parse LLM response: {parse_err}", "raw_response": llm_response},
+                        agent_id=self.agent_id
+                    )
+            return TaskResult(
+                task_id=getattr(task_context, 'task_id', None),
+                status="completed",
+                result=llm_response,
+                agent_id=self.agent_id
+            )
+        except Exception as e:
+            logger.error(f"[ARCHITECTURE:agent] LLM or processing error: {e}")
+            return TaskResult(
+                task_id=getattr(task_context, 'task_id', None),
+                status="failed",
+                result={"error": str(e)},
+                agent_id=self.agent_id
+            )
