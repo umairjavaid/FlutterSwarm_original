@@ -186,7 +186,7 @@ class ToolRegistry:
                     "category": "FILE_SYSTEM", 
                     "required_for": ["file_operations", "project_management"]
                 }),
-                ("process_tool", "ProcessTool", ["flutter_sdk_tool"], {
+                ("process_tool", "ProcessTool", ["flutter_sdk"], { # Changed "flutter_sdk_tool" to "flutter_sdk"
                     "priority": 8,
                     "category": "PROCESS",
                     "required_for": ["execution", "monitoring"]

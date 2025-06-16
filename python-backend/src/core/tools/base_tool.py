@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
+import uuid
 
 from ...config import get_logger
 from ...models.tool_models import (
@@ -36,55 +37,7 @@ class ToolCategory(Enum):
     NETWORK = "network"
     SECURITY = "security"
     MONITORING = "monitoring"
-
-
-@dataclass
-class ToolContext:
-    """Context information for tool execution."""
-    project_path: Optional[str] = None
-    agent_id: str = ""
-    session_id: str = ""
-    environment: Dict[str, Any] = field(default_factory=dict)
-    constraints: Dict[str, Any] = field(default_factory=dict)
-    preferences: Dict[str, Any] = field(default_factory=dict)
-"""
-Base Tool Framework for FlutterSwarm Multi-Agent System.
-
-This module provides the abstract base class that all specialized tools inherit from.
-Every tool provides structured capabilities for agents to perform operations through LLM reasoning.
-"""
-
-import asyncio
-import json
-import logging
-import time
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Union, Callable
-
-from ...config import get_logger
-from ...models.tool_models import (
-    ToolStatus, ToolPermission, ToolOperation, ToolResult, ToolCapabilities,
-    ToolUsageEntry, ToolMetrics
-)
-
-logger = get_logger("base_tool")
-
-
-class ToolCategory(Enum):
-    """Categories of tools for organization."""
-    DEVELOPMENT = "development"
-    BUILD = "build"
-    TEST = "test"
-    DEPLOY = "deploy"
-    ANALYSIS = "analysis"
-    FILE_SYSTEM = "file_system"
-    PROCESS = "process"
-    NETWORK = "network"
-    SECURITY = "security"
-    MONITORING = "monitoring"
+    VERSION_CONTROL = "version_control"
 
 
 @dataclass

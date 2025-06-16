@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 import re
 
-from .base_tool import BaseTool
+from .base_tool import BaseTool, ToolCategory, ToolPermission # Added ToolCategory and ToolPermission
 from ...models.tool_models import (
     ToolCapability, ToolOperation, ToolResult, ToolUsageExample,
     ToolValidation, ToolPerformanceMetrics, ToolLearningData
@@ -44,13 +44,7 @@ class GitTool(BaseTool):
             description="Comprehensive Git version control operations",
             version="1.0.0",
             capabilities=[
-                ToolCapability.SOURCE_CONTROL,
-                ToolCapability.REPOSITORY_MANAGEMENT,
-                ToolCapability.BRANCH_MANAGEMENT,
-                ToolCapability.COMMIT_OPERATIONS,
-                ToolCapability.REMOTE_OPERATIONS,
-                ToolCapability.CONFLICT_RESOLUTION,
-                ToolCapability.RELEASE_MANAGEMENT
+                ToolCapability.VERSION_CONTROL,
             ]
         )
         
@@ -122,6 +116,28 @@ app.*.map.json
             "ios": "iOS platform specific changes",
             "web": "Web platform specific changes"
         }
+
+    async def get_capabilities(self) -> Dict[str, Any]:
+        """Get Git tool capabilities."""
+        return {
+            "operations": [
+                "init_repository", "clone_repository", "create_branch", "switch_branch",
+                "commit_changes", "push_changes", "pull_changes", "merge_branch",
+                "create_tag", "get_status", "get_history", "resolve_conflicts", "setup_hooks"
+            ],
+            "version_control_system": "git",
+            "flutter_specific_conventions": True
+        }
+
+    async def validate_params(self, operation: str, params: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """Validate parameters for a given Git operation."""
+        # Basic validation, can be expanded
+        if operation == "clone_repository" and "repo_url" not in params:
+            return False, "Missing 'repo_url' for clone_repository operation"
+        if operation == "create_branch" and "branch_name" not in params:
+            return False, "Missing 'branch_name' for create_branch operation"
+        # Add more validation rules as needed
+        return True, None
 
     async def execute(
         self, 
@@ -689,23 +705,47 @@ fi
         
         return health_status
 
-    async def get_performance_metrics(self) -> ToolPerformanceMetrics:
-        """Get Git tool performance metrics."""
-        return ToolPerformanceMetrics(
-            tool_name=self.name,
-            operation_count=len(self.usage_history),
-            average_execution_time=sum(
-                usage.execution_time for usage in self.usage_history
-            ) / len(self.usage_history) if self.usage_history else 0.0,
-            success_rate=sum(
-                1 for usage in self.usage_history if usage.success
-            ) / len(self.usage_history) if self.usage_history else 0.0,
-            error_rate=sum(
-                1 for usage in self.usage_history if not usage.success
-            ) / len(self.usage_history) if self.usage_history else 0.0,
-            last_used=max(
-                (usage.timestamp for usage in self.usage_history),
-                default=None
-            ),
-            resource_usage={"memory_mb": 50, "cpu_percent": 10}
-        )
+    async def learn_from_usage(self, usage_entry: ToolUsageExample) -> None:
+        """Learn from a usage example to improve future performance or suggestions."""
+        # Implementation depends on how the tool is expected to learn
+        # This could involve updating internal models, adjusting parameters, etc.
+        # Example: git_tool.learn_from_usage(usage_entry)
+        pass
+
+    async def get_tool_schema(self) -> Dict[str, Any]:
+        """Get the JSON schema for the tool's operations and parameters."""
+        # This would typically be loaded from a schema file or generated
+        return {
+            "type": "object",
+            "properties": {
+                "operation_type": {"type": "string", "enum": [
+                    "init_repository", "clone_repository", "create_branch", 
+                    "switch_branch", "commit_changes", "push_changes", 
+                    "pull_changes", "merge_branch", "create_tag", 
+                    "get_status", "get_history", "resolve_conflicts", 
+                    "setup_hooks"
+                ]},
+                "parameters": {"type": "object"} 
+            },
+            "required": ["operation_type", "parameters"]
+        }
+
+    async def get_health_status(self) -> Dict[str, Any]:
+        """Check the health of the Git tool (e.g., Git executable available)."""
+        try:
+            # Check if git command is available
+            process = await asyncio.create_subprocess_exec(
+                "git", "--version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                return {"status": "healthy", "version": stdout.decode().strip()}
+            else:
+                return {"status": "unhealthy", "error": stderr.decode().strip()}
+        except FileNotFoundError:
+            return {"status": "unhealthy", "error": "Git executable not found"}
+        except Exception as e:
+            return {"status": "error", "details": str(e)}
