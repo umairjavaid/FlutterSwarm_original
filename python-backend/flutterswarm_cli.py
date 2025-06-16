@@ -52,52 +52,185 @@ class FlutterSwarmCLI:
             await stop_system()
             print("✅ System shutdown complete")
     
+    def _analyze_task_requirements(self, description: str) -> Dict[str, Any]:
+        """Analyze task description to extract requirements dynamically."""
+        requirements = {
+            "project_name": "flutter_app",
+            "project_type": "app",
+            "features": [],
+            "complexity": "simple",
+            "architectural_pattern": "basic"
+        }
+        
+        description_lower = description.lower()
+        
+        # Extract project name using multiple strategies
+        project_name = self._extract_project_name(description)
+        if project_name:
+            requirements["project_name"] = project_name
+        
+        # Determine project type
+        if any(term in description_lower for term in ["plugin", "package", "library"]):
+            requirements["project_type"] = "plugin"
+        elif "web" in description_lower:
+            requirements["project_type"] = "web"
+        elif "desktop" in description_lower:
+            requirements["project_type"] = "desktop"
+        else:
+            requirements["project_type"] = "app"
+        
+        # Extract features dynamically
+        feature_keywords = {
+            "authentication": ["login", "auth", "signin", "signup", "user"],
+            "navigation": ["navigation", "routing", "drawer", "tabs", "menu"],
+            "data_management": ["database", "storage", "api", "network", "crud"],
+            "ui_components": ["form", "list", "grid", "card", "chart"],
+            "media": ["camera", "photo", "video", "gallery", "image"],
+            "location": ["maps", "location", "gps", "geolocation"],
+            "notifications": ["notification", "push", "alert", "message"],
+            "payments": ["payment", "purchase", "billing", "subscription"],
+            "social": ["share", "social", "chat", "messaging"],
+            "offline": ["offline", "sync", "cache", "local"]
+        }
+        
+        for feature, keywords in feature_keywords.items():
+            if any(keyword in description_lower for keyword in keywords):
+                requirements["features"].append(feature)
+        
+        # Determine complexity
+        complexity_indicators = {
+            "simple": ["simple", "basic", "minimal", "quick", "small"],
+            "medium": ["standard", "medium", "regular", "typical"],
+            "complex": ["complex", "advanced", "enterprise", "large", "comprehensive", "full-featured"]
+        }
+        
+        for complexity, indicators in complexity_indicators.items():
+            if any(indicator in description_lower for indicator in indicators):
+                requirements["complexity"] = complexity
+                break
+        
+        # Determine architectural pattern preference
+        if any(term in description_lower for term in ["clean architecture", "layered", "domain driven"]):
+            requirements["architectural_pattern"] = "clean"
+        elif any(term in description_lower for term in ["bloc", "cubit", "business logic"]):
+            requirements["architectural_pattern"] = "bloc"
+        elif "provider" in description_lower:
+            requirements["architectural_pattern"] = "provider"
+        elif "riverpod" in description_lower:
+            requirements["architectural_pattern"] = "riverpod"
+        
+        return requirements
+    
+    def _extract_project_name(self, description: str) -> str:
+        """Extract project name from description using multiple strategies."""
+        import re
+        
+        # Strategy 1: Look for "app named X" or "called X" patterns
+        name_patterns = [
+            r"app named (\w+)",
+            r"called (\w+)",
+            r"app '([^']+)'",
+            r'app "([^"]+)"',
+            r"project (\w+)",
+            r"build (\w+) app",
+            r"create (\w+) app"
+        ]
+        
+        for pattern in name_patterns:
+            match = re.search(pattern, description, re.IGNORECASE)
+            if match:
+                name = match.group(1).strip()
+                # Convert to valid Dart package name
+                return self._normalize_project_name(name)
+        
+        # Strategy 2: Extract descriptive terms and build name
+        description_words = description.lower().split()
+        
+        # Remove common stop words
+        stop_words = {
+            "create", "build", "make", "develop", "a", "an", "the", "app", "application",
+            "flutter", "using", "with", "for", "that", "can", "will", "should", "simple",
+            "basic", "standard", "new", "mobile"
+        }
+        
+        descriptive_words = []
+        for word in description_words:
+            cleaned_word = re.sub(r'[^a-zA-Z0-9]', '', word)
+            if cleaned_word and cleaned_word not in stop_words and len(cleaned_word) > 2:
+                descriptive_words.append(cleaned_word)
+                if len(descriptive_words) >= 3:  # Limit to 3 words max
+                    break
+        
+        if descriptive_words:
+            project_name = "_".join(descriptive_words)
+            return self._normalize_project_name(project_name)
+        
+        # Strategy 3: Generate based on detected features
+        requirements = self._analyze_task_requirements(description)
+        features = requirements.get("features", [])
+        
+        if features:
+            # Use primary feature for naming
+            primary_feature = features[0].replace("_", "")
+            return f"{primary_feature}_app"
+        
+        # Fallback: Use timestamp-based name
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%m%d_%H%M")
+        return f"flutter_app_{timestamp}"
+    
+    def _normalize_project_name(self, name: str) -> str:
+        """Normalize project name to valid Dart package name format."""
+        import re
+        
+        # Convert to lowercase and replace spaces/special chars with underscores
+        normalized = re.sub(r'[^a-zA-Z0-9_]', '_', name.lower())
+        
+        # Remove consecutive underscores
+        normalized = re.sub(r'_+', '_', normalized)
+        
+        # Remove leading/trailing underscores
+        normalized = normalized.strip('_')
+        
+        # Ensure it starts with a letter
+        if normalized and not normalized[0].isalpha():
+            normalized = f"app_{normalized}"
+        
+        # Limit length
+        if len(normalized) > 30:
+            normalized = normalized[:30].rstrip('_')
+        
+        return normalized or "flutter_app"
+
     async def submit_task(self, description: str, task_type: str = "analysis", priority: str = "normal"):
-        """Submit a task to the system."""
+        """Submit a task to the system with dynamic requirement analysis."""
         if not self.system:
             print("❌ System not initialized. Run 'init' first.")
             return
         
-        print(f"📝 Submitting task: {description[:60]}...")
+        print(f"📝 Analyzing task: {description[:60]}...")
         
-        # Dynamically determine project name and type
-        # This is a simple heuristic, a more robust solution might be needed
-        project_name = "new_flutter_project" # Default project name
-        project_type = "app" # Default project type
-
-        if "app" in description.lower():
-            project_type = "app"
-        elif "plugin" in description.lower():
-            project_type = "plugin"
-        elif "package" in description.lower():
-            project_type = "package"
+        # Analyze requirements dynamically
+        requirements = self._analyze_task_requirements(description)
         
-        # Try to extract a project name (e.g., "create ... app named X")
-        name_match = re.search(r"app named (\w+)", description, re.IGNORECASE)
-        if name_match:
-            project_name = name_match.group(1)
-        else:
-            # Fallback: try to generate a name from the description
-            # e.g., "create prod standard flutter music app" -> "flutter_music_app"
-            name_parts = []
-            for word in description.lower().split():
-                if word not in ["create", "a", "an", "the", "app", "flutter", "standard", "prod"]:
-                    name_parts.append(word)
-                if word == "app":
-                    break # stop after "app"
-            if name_parts:
-                project_name = "_".join(name_parts)
-            if not project_name: # if still empty
-                project_name = "generated_project"
-
+        print(f"📊 Detected requirements:")
+        print(f"  Project: {requirements['project_name']}")
+        print(f"  Type: {requirements['project_type']}")
+        print(f"  Complexity: {requirements['complexity']}")
+        if requirements['features']:
+            print(f"  Features: {', '.join(requirements['features'])}")
+        print(f"  Pattern: {requirements['architectural_pattern']}")
 
         request = {
             "description": description,
             "task_type": task_type,
             "priority": priority,
             "project_context": {
-                "project_name": project_name,
-                "project_type": project_type
+                "project_name": requirements["project_name"],
+                "project_type": requirements["project_type"],
+                "features": requirements["features"],
+                "complexity": requirements["complexity"],
+                "architectural_pattern": requirements["architectural_pattern"]
             }
         }
         

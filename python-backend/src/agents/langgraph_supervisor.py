@@ -1374,61 +1374,61 @@ class SupervisorAgent:
         }
         return capabilities_map.get(agent_role, ["general_purpose"])
     
-    def _generate_pubspec_yaml(self) -> str:
-        """Generate a basic Flutter pubspec.yaml file."""
-        return """name: simple_button_app
-description: A simple Flutter app with two buttons
+    def _generate_dynamic_project_files(self, project_name: str, app_description: str, features: List[str] = None) -> Dict[str, str]:
+        """Generate Flutter project files dynamically using template engine."""
+        from ..core.template_engine import get_template_engine, TemplateContext, ArchitecturalPattern
+        
+        if features is None:
+            features = ["home", "settings"]
+        
+        # Create template context from user requirements
+        context = TemplateContext(
+            app_name=project_name,
+            app_description=app_description,
+            architectural_pattern=ArchitecturalPattern.BASIC_PATTERN,
+            features=features
+        )
+        
+        template_engine = get_template_engine()
+        
+        try:
+            project_files = template_engine.generate_project_structure(context)
+            logger.info(f"Generated {len(project_files)} files for project: {project_name}")
+            return project_files
+        except Exception as e:
+            logger.error(f"Failed to generate project files: {e}")
+            return {}
 
-version: 1.0.0+1
+    def _write_dynamic_flutter_project(self, project_name: str, app_description: str, features: List[str] = None) -> str:
+        """Write Flutter project files dynamically to the designated output directory."""
+        from ..config.settings import settings
+        
+        # Get the root project directory
+        current_dir = Path(__file__).resolve().parent.parent.parent.parent
+        output_dir = current_dir / settings.flutter.output_directory / project_name.lower().replace(' ', '_')
+        
+        # Generate project files dynamically
+        project_files = self._generate_dynamic_project_files(project_name, app_description, features)
+        
+        if not project_files:
+            logger.error("No project files generated")
+            return f"Failed to generate project files for {project_name}"
+        
+        try:
+            # Create project directory structure
+            for file_path, content in project_files.items():
+                full_path = output_dir / file_path
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                full_path.write_text(content, encoding='utf-8')
+            
+            logger.info(f"Successfully created Flutter project: {project_name}")
+            return f"Successfully created Flutter project at {output_dir}"
+            
+        except Exception as e:
+            logger.error(f"Failed to write project files: {e}")
+            return f"Failed to create project: {str(e)}"
 
-environment:
-  sdk: '>=3.0.0 <4.0.0'
-  flutter: ">=3.0.0"
-
-dependencies:
-  flutter:
-    sdk: flutter
-  cupertino_icons: ^1.0.2
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^2.0.0
-
-flutter:
-  uses-material-design: true
-"""
-
-    def _generate_main_dart(self) -> str:
-        """Generate the main.dart file for the Flutter app."""
-        return """import 'package:flutter/material.dart';
-import 'button_app.dart';
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Simple Button App',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
-      home: const ButtonApp(),
-    );
-  }
-}
-"""
-
-    def _generate_button_app_dart(self) -> str:
-        """Generate the button app widget."""
-        return """import 'package:flutter/material.dart';
-
+    # ...existing code...
 class ButtonApp extends StatefulWidget {
   const ButtonApp({super.key});
 

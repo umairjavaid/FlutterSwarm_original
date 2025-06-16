@@ -81,14 +81,11 @@ class ImplementationAgent(BaseAgent):
             "architecture": ["clean", "mvvm", "mvc", "bloc_pattern"]
         }
         
-        self.code_templates = {
-            "widget_template": self._get_widget_template(),
-            "bloc_template": self._get_bloc_template(),
-            "repository_template": self._get_repository_template(),
-            "model_template": self._get_model_template()
-        }
+        # Remove hardcoded templates - use dynamic template system
+        from ..core.template_engine import get_template_engine
+        self.template_engine = get_template_engine()
         
-        logger.info(f"Implementation Agent {self.agent_id} initialized")
+        logger.info(f"Implementation Agent {self.agent_id} initialized with dynamic templates")
 
     async def _get_default_system_prompt(self) -> str:
         """Get the default system prompt for the implementation agent."""
@@ -239,81 +236,268 @@ Always generate complete, working code solutions with proper imports, error hand
             "responsive_breakpoints": ui_implementation.get("breakpoints", {})
         }
 
-    # Template methods for code generation
-    def _get_widget_template(self) -> str:
-        """Get widget template for code generation."""
-        return """
-import 'package:flutter/material.dart';
+    # Remove hardcoded template methods and replace with dynamic ones
+    def _get_dynamic_template(self, template_type: str, architectural_pattern: str = "basic") -> str:
+        """Get template dynamically from template engine."""
+        from ..core.template_engine import TemplateType, ArchitecturalPattern, TemplateContext
+        
+        # Map string types to enums
+        type_map = {
+            "widget": TemplateType.WIDGET,
+            "bloc": TemplateType.BLOC, 
+            "repository": TemplateType.REPOSITORY,
+            "model": TemplateType.MODEL,
+            "service": TemplateType.SERVICE,
+            "screen": TemplateType.SCREEN
+        }
+        
+        pattern_map = {
+            "basic": ArchitecturalPattern.BASIC_PATTERN,
+            "clean": ArchitecturalPattern.CLEAN_ARCHITECTURE,
+            "bloc": ArchitecturalPattern.BLOC_PATTERN,
+            "provider": ArchitecturalPattern.PROVIDER_PATTERN
+        }
+        
+        template_type_enum = type_map.get(template_type)
+        pattern_enum = pattern_map.get(architectural_pattern, ArchitecturalPattern.BASIC_PATTERN)
+        
+        if template_type_enum:
+            template = self.template_engine.get_template(template_type_enum, pattern_enum)
+            return template.source if template else ""
+        
+        return ""
 
-class {widget_name} extends {widget_type} {{
-  {constructor}
-  
-  {build_method}
-}}
+    def _create_dynamic_implementation_prompt(
+        self,
+        task_context: TaskContext,
+        llm_analysis: Dict[str, Any]
+    ) -> str:
+        """Create prompt for implementation using dynamic templates."""
+        return f"""
+Implement a complete Flutter feature based on the following specifications:
+
+FEATURE REQUIREMENTS:
+{task_context.description}
+
+TECHNICAL ANALYSIS:
+{json.dumps(llm_analysis, indent=2)}
+
+PROJECT CONTEXT:
+{json.dumps(task_context.project_context, indent=2)}
+
+Please provide a comprehensive implementation using appropriate architectural patterns:
+
+1. DYNAMIC TEMPLATE SELECTION:
+   - Analyze requirements to determine optimal architectural pattern
+   - Select appropriate templates (basic, clean architecture, BLoC, etc.)
+   - Customize templates based on specific feature needs
+
+2. FEATURE ARCHITECTURE:
+   - Component structure based on selected pattern
+   - State management approach matching user preferences
+   - Data flow and dependencies optimized for requirements
+   - Integration points with existing code
+
+3. CODE IMPLEMENTATION:
+   - Generate all necessary Dart files using dynamic templates
+   - Implement proper Flutter widget structures
+   - Setup state management according to selected pattern
+   - Include error handling and validation
+   - Apply performance optimizations
+
+4. RESPONSIVE UI IMPLEMENTATION:
+   - Create adaptive widget layouts for all screen sizes
+   - Follow Material Design or Cupertino guidelines
+   - Include accessibility considerations
+   - Add smooth animations and interactions
+
+5. DATA LAYER (if needed):
+   - Generate model classes with proper serialization
+   - Implement repository pattern for data access
+   - Setup API service integrations
+   - Configure local storage solutions
+
+6. TESTING STRATEGY:
+   - Generate unit tests for business logic
+   - Create widget tests for UI components
+   - Setup integration test framework
+   - Provide mock implementations
+
+7. DEPENDENCIES AND CONFIGURATION:
+   - Determine required pubspec.yaml dependencies
+   - Generate configuration files
+   - Setup platform-specific configurations
+   - Provide setup and deployment instructions
+
+Respond with a structured implementation using dynamic templates that match the requirements.
 """
 
-    def _get_bloc_template(self) -> str:
-        """Get BLoC template for state management."""
-        return """
-import 'package:bloc/bloc.dart';
-import 'package:equatable/equatable.dart';
-
-// Events
-abstract class {bloc_name}Event extends Equatable {{
-  @override
-  List<Object> get props => [];
-}}
-
-// States
-abstract class {bloc_name}State extends Equatable {{
-  @override
-  List<Object> get props => [];
-}}
-
-// BLoC
-class {bloc_name}Bloc extends Bloc<{bloc_name}Event, {bloc_name}State> {{
-  {bloc_name}Bloc() : super({initial_state}()) {{
-    {event_handlers}
-  }}
-}}
-"""
-
-    def _get_repository_template(self) -> str:
-        """Get repository template for data layer."""
-        return """
-abstract class {repository_name}Repository {{
-  {methods}
-}}
-
-class {repository_name}RepositoryImpl implements {repository_name}Repository {{
-  {dependencies}
-  
-  {repository_name}RepositoryImpl({{
-    {constructor_params}
-  }});
-  
-  {method_implementations}
-}}
-"""
-
-    def _get_model_template(self) -> str:
-        """Get model template for data models."""
-        return """
-import 'package:equatable/equatable.dart';
-
-class {model_name} extends Equatable {{
-  {properties}
-  
-  const {model_name}({{
-    {constructor_params}
-  }});
-  
-  {methods}
-  
-  @override
-  List<Object?> get props => {props_list};
-}}
-"""
+    async def _generate_code_dynamically(
+        self,
+        task_context: TaskContext,
+        llm_analysis: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate code files dynamically based on task requirements."""
+        logger.info(f"Generating code dynamically for task: {task_context.task_id}")
+        
+        try:
+            # Analyze requirements to determine template strategy
+            requirements = self._analyze_implementation_requirements(task_context, llm_analysis)
+            
+            # Create prompt for dynamic code generation
+            generation_prompt = self._create_dynamic_implementation_prompt(task_context, llm_analysis)
+            
+            # Get LLM response for code structure
+            code_plan = await self.execute_llm_task(
+                user_prompt=generation_prompt,
+                context={
+                    "task": task_context.to_dict(),
+                    "requirements": requirements,
+                    "available_patterns": ["basic", "clean", "bloc", "provider", "riverpod"]
+                },
+                structured_output=True
+            )
+            
+            if not code_plan:
+                raise Exception("No code plan generated by LLM")
+            
+            # Generate files using template engine
+            generated_files = {}
+            
+            if code_plan.get("files"):
+                for file_info in code_plan["files"]:
+                    file_path = file_info.get("path")
+                    template_type = file_info.get("template_type", "widget")
+                    pattern = file_info.get("architectural_pattern", "basic")
+                    variables = file_info.get("variables", {})
+                    
+                    # Use template engine to generate content
+                    content = self._generate_file_from_template(
+                        template_type, pattern, variables, file_info.get("custom_content")
+                    )
+                    
+                    if content:
+                        generated_files[file_path] = content
+            
+            return {
+                "code_files": generated_files,
+                "implementation_notes": code_plan.get("instructions", []),
+                "dependencies": code_plan.get("dependencies", []),
+                "architectural_pattern": code_plan.get("pattern", "basic"),
+                "total_files": len(generated_files)
+            }
+            
+        except Exception as e:
+            logger.error(f"Dynamic code generation failed: {e}")
+            return {
+                "error": str(e),
+                "code_files": {},
+                "implementation_notes": [f"Dynamic code generation failed: {str(e)}"]
+            }
+    
+    def _analyze_implementation_requirements(
+        self, 
+        task_context: TaskContext, 
+        llm_analysis: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze implementation requirements to determine optimal approach."""
+        requirements = {
+            "complexity": "simple",
+            "architectural_pattern": "basic",
+            "state_management": "stateful",
+            "features": [],
+            "ui_complexity": "basic",
+            "data_requirements": None
+        }
+        
+        description = task_context.description.lower()
+        
+        # Determine complexity
+        if any(term in description for term in ["complex", "advanced", "enterprise", "large-scale"]):
+            requirements["complexity"] = "complex"
+        elif any(term in description for term in ["medium", "moderate", "standard"]):
+            requirements["complexity"] = "medium"
+        
+        # Determine architectural pattern
+        if "clean architecture" in description or "layered" in description:
+            requirements["architectural_pattern"] = "clean"
+        elif "bloc" in description or "cubit" in description:
+            requirements["architectural_pattern"] = "bloc"
+        elif "provider" in description:
+            requirements["architectural_pattern"] = "provider"
+        elif "riverpod" in description:
+            requirements["architectural_pattern"] = "riverpod"
+        
+        # Extract features
+        common_features = [
+            "authentication", "login", "user management",
+            "navigation", "routing", "drawer", "tabs",
+            "forms", "validation", "input",
+            "lists", "grid", "cards",
+            "api", "network", "http",
+            "database", "storage", "persistence",
+            "notifications", "push", "alerts",
+            "camera", "photos", "gallery",
+            "maps", "location", "gps",
+            "payments", "purchase", "billing"
+        ]
+        
+        for feature in common_features:
+            if feature in description:
+                requirements["features"].append(feature)
+        
+        return requirements
+    
+    def _generate_file_from_template(
+        self, 
+        template_type: str, 
+        pattern: str, 
+        variables: Dict[str, Any],
+        custom_content: Optional[str] = None
+    ) -> Optional[str]:
+        """Generate file content from template with variables."""
+        from ..core.template_engine import TemplateType, ArchitecturalPattern, TemplateContext
+        
+        if custom_content:
+            # Use custom content if provided
+            return custom_content
+        
+        # Map template type and pattern
+        type_map = {
+            "widget": TemplateType.WIDGET,
+            "screen": TemplateType.SCREEN,
+            "model": TemplateType.MODEL,
+            "bloc": TemplateType.BLOC,
+            "repository": TemplateType.REPOSITORY,
+            "service": TemplateType.SERVICE,
+            "test": TemplateType.TEST
+        }
+        
+        pattern_map = {
+            "basic": ArchitecturalPattern.BASIC_PATTERN,
+            "clean": ArchitecturalPattern.CLEAN_ARCHITECTURE,
+            "bloc": ArchitecturalPattern.BLOC_PATTERN,
+            "provider": ArchitecturalPattern.PROVIDER_PATTERN,
+            "riverpod": ArchitecturalPattern.RIVERPOD_PATTERN
+        }
+        
+        template_type_enum = type_map.get(template_type)
+        pattern_enum = pattern_map.get(pattern, ArchitecturalPattern.BASIC_PATTERN)
+        
+        if not template_type_enum:
+            logger.warning(f"Unknown template type: {template_type}")
+            return None
+        
+        # Create template context
+        context = TemplateContext(
+            app_name=variables.get("app_name", "MyApp"),
+            app_description=variables.get("app_description", "Flutter application"),
+            architectural_pattern=pattern_enum,
+            custom_variables=variables
+        )
+        
+        # Render template
+        return self.template_engine.render_template(template_type_enum, context)
 
     # Prompt creation methods
     def _create_feature_implementation_prompt(
