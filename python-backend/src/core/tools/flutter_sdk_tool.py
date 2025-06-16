@@ -48,7 +48,7 @@ class FlutterSDKTool(BaseTool):
             version="2.0.0",
             category=ToolCategory.DEVELOPMENT,
             required_permissions=[
-                ToolPermission.PROCESS_EXECUTION,
+                ToolPermission.PROCESS_SPAWN,
                 ToolPermission.FILE_WRITE,
                 ToolPermission.DIRECTORY_CREATE
             ]
