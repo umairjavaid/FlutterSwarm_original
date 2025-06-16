@@ -12,11 +12,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 import re
 
-from .base_tool import BaseTool, ToolCategory, ToolPermission # Added ToolCategory and ToolPermission
-from ...models.tool_models import (
-    ToolCapability, ToolOperation, ToolResult, ToolUsageExample,
-    ToolValidation, ToolMetrics
+from .base_tool import (
+    BaseTool, ToolCategory, ToolPermission, ToolCapabilities, 
+    ToolResult, ToolStatus
 )
+from .tool_models import ToolOperation
 from ...config import get_logger
 
 logger = get_logger("git_tool")
@@ -145,60 +145,56 @@ app.*.map.json
 
     async def execute(
         self, 
-        operation: ToolOperation, 
-        context: Optional[Dict[str, Any]] = None
+        operation: str, 
+        params: Dict[str, Any], 
+        operation_id: Optional[str] = None
     ) -> ToolResult:
         """Execute a Git operation."""
         start_time = datetime.now()
         
         try:
-            # Validate operation
-            validation = await self.validate_operation(operation)
-            if not validation.is_valid:
+            # Validate parameters
+            is_valid, error_msg = await self.validate_params(operation, params)
+            if not is_valid:
                 return ToolResult(
-                    tool_name=self.name,
-                    operation=operation.operation_type,
-                    success=False,
-                    result=None,
-                    error=f"Validation failed: {validation.error_message}",
-                    execution_time=(datetime.now() - start_time).total_seconds(),
-                    metadata={"validation_errors": validation.validation_errors}
+                    status=ToolStatus.FAILURE,
+                    data={},
+                    error_message=f"Validation failed: {error_msg}",
+                    execution_time=(datetime.now() - start_time).total_seconds()
                 )
             
             # Route to specific operation handler
-            if operation.operation_type == "init_repository":
-                result = await self._init_repository(operation.parameters)
-            elif operation.operation_type == "clone_repository":
-                result = await self._clone_repository(operation.parameters)
-            elif operation.operation_type == "create_branch":
-                result = await self._create_branch(operation.parameters)
-            elif operation.operation_type == "switch_branch":
-                result = await self._switch_branch(operation.parameters)
-            elif operation.operation_type == "commit_changes":
-                result = await self._commit_changes(operation.parameters)
-            elif operation.operation_type == "push_changes":
-                result = await self._push_changes(operation.parameters)
-            elif operation.operation_type == "pull_changes":
-                result = await self._pull_changes(operation.parameters)
-            elif operation.operation_type == "merge_branch":
-                result = await self._merge_branch(operation.parameters)
-            elif operation.operation_type == "create_tag":
-                result = await self._create_tag(operation.parameters)
-            elif operation.operation_type == "get_status":
-                result = await self._get_status(operation.parameters)
-            elif operation.operation_type == "get_history":
-                result = await self._get_history(operation.parameters)
-            elif operation.operation_type == "resolve_conflicts":
-                result = await self._resolve_conflicts(operation.parameters)
-            elif operation.operation_type == "setup_hooks":
-                result = await self._setup_hooks(operation.parameters)
+            if operation == "init_repository":
+                result = await self._init_repository(params)
+            elif operation == "clone_repository":
+                result = await self._clone_repository(params)
+            elif operation == "create_branch":
+                result = await self._create_branch(params)
+            elif operation == "switch_branch":
+                result = await self._switch_branch(params)
+            elif operation == "commit_changes":
+                result = await self._commit_changes(params)
+            elif operation == "push_changes":
+                result = await self._push_changes(params)
+            elif operation == "pull_changes":
+                result = await self._pull_changes(params)
+            elif operation == "merge_branch":
+                result = await self._merge_branch(params)
+            elif operation == "create_tag":
+                result = await self._create_tag(params)
+            elif operation == "get_status":
+                result = await self._get_status(params)
+            elif operation == "get_history":
+                result = await self._get_history(params)
+            elif operation == "resolve_conflicts":
+                result = await self._resolve_conflicts(params)
+            elif operation == "setup_hooks":
+                result = await self._setup_hooks(params)
             else:
                 return ToolResult(
-                    tool_name=self.name,
-                    operation=operation.operation_type,
-                    success=False,
-                    result=None,
-                    error=f"Unknown operation: {operation.operation_type}",
+                    status=ToolStatus.FAILURE,
+                    data={},
+                    error_message=f"Unknown operation: {operation}",
                     execution_time=(datetime.now() - start_time).total_seconds()
                 )
             

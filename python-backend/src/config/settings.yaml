@@ -9,8 +9,8 @@ llm:
   default_model: "claude-sonnet-4-20250514"
   max_tokens: 8000
   temperature: 0.3
-  timeout: 30
-  max_retries: 3
+  timeout: 120
+  max_retries: 1
   rate_limit: 60
 
 # Database Configuration  
