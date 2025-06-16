@@ -115,7 +115,7 @@ class AnthropicProvider(BaseLLMProvider):
                 messages.append({"role": "user", "content": request.prompt})
             
             # Use asyncio.wait_for to add timeout
-            timeout = 60  # Reduced from 120 to 60 seconds to prevent hanging
+            timeout = 180  # Increased from 60 to 180 seconds
             
             response = await asyncio.wait_for(
                 self.client.messages.create(
@@ -329,33 +329,82 @@ class LLMClient:
         self._initialize_providers()
     
     def _initialize_providers(self) -> None:
-        """Initialize providers with local fallback for demonstration."""
+        """Initializes LLM providers. Attempts to use configured API-based providers first.
+        Falls back to LocalFallbackProvider if API-based providers are not available,
+        not configured, or fail to initialize.
+        """
+        primary_provider_initialized = False
         try:
-            # Force local fallback for demonstration - no API calls
-            logger.info("Using local fallback provider for FlutterSwarm demonstration.")
-            self.providers['local_fallback'] = LocalFallbackProvider()
-            self.default_provider = 'local_fallback'
+            # Attempt to initialize Anthropic provider
+            if hasattr(settings.llm, 'anthropic_api_key') and settings.llm.anthropic_api_key:
+                if ANTHROPIC_AVAILABLE:
+                    logger.info("Anthropic API key found. Initializing Anthropic provider.")
+                    self.providers['anthropic'] = AnthropicProvider(
+                        api_key=settings.llm.anthropic_api_key,
+                        rate_limit=getattr(settings.llm, 'anthropic_rate_limit', 60)
+                    )
+                    self.default_provider = 'anthropic'
+                    primary_provider_initialized = True
+                    logger.info("Anthropic provider initialized and set as default.")
+                else:
+                    logger.error("Anthropic API key provided but 'anthropic' library not installed. "
+                                 "Install with: pip install anthropic. Will attempt fallback.")
+            else:
+                logger.info("Anthropic API key not found or not configured in settings.llm. "
+                             "Will attempt other providers or fallback.")
             
-            # Comment out API provider initialization for demonstration
-            # # Anthropic provider
-            # if hasattr(settings.llm, 'anthropic_api_key') and settings.llm.anthropic_api_key:
-            #     if ANTHROPIC_AVAILABLE:
-            #         self.providers['anthropic'] = AnthropicProvider(
-            #             api_key=settings.llm.anthropic_api_key,
-            #             rate_limit=getattr(settings.llm, 'anthropic_rate_limit', 60)
-            #         )
-            #         self.default_provider = 'anthropic'
+            # Add other primary provider initializations here if any in the future.
+            # Example:
+            # if hasattr(settings.llm, 'openai_api_key') and settings.llm.openai_api_key:
+            #     if OPENAI_AVAILABLE: # Check if library for openai is available
+            #         logger.info("OpenAI API key found. Initializing OpenAI provider.")
+            #         self.providers['openai'] = OpenAIProvider(api_key=settings.llm.openai_api_key) # Assuming OpenAIProvider exists
+            #         if not primary_provider_initialized: # Set as default if no other primary was set
+            #             self.default_provider = 'openai'
+            #             primary_provider_initialized = True
+            #             logger.info("OpenAI provider initialized and set as default.")
             #     else:
-            #         logger.error("Anthropic API key provided but anthropic library not installed")
-                    
+            #         logger.error("OpenAI API key provided but library not installed.")
+
+
         except Exception as e:
-            raise LLMError(f"Failed to initialize LLM providers: {e}")
-        
-        if not self.providers:
-            # Fallback initialization
-            logger.warning("No providers configured. Using local fallback provider.")
-            self.providers['local_fallback'] = LocalFallbackProvider()
+            logger.error(f"Exception during primary LLM provider initialization: {e}. "
+                         "Will use fallback provider.")
+            primary_provider_initialized = False # Ensure fallback is used
+
+        # Fallback initialization if no primary provider was successfully initialized
+        if not primary_provider_initialized:
+            logger.warning("No primary LLM provider was successfully initialized or configured. "
+                         "Using local fallback provider.")
+            # Ensure LocalFallbackProvider is in providers list
+            if 'local_fallback' not in self.providers:
+                try:
+                    self.providers['local_fallback'] = LocalFallbackProvider()
+                except Exception as fallback_init_e:
+                    # This is a critical failure if even LocalFallbackProvider can't be initialized.
+                    raise LLMError(f"CRITICAL: Failed to initialize LocalFallbackProvider: {fallback_init_e}")
+            
             self.default_provider = 'local_fallback'
+            logger.info("LocalFallbackProvider is set as the default provider.")
+        
+        # Final check: if default_provider is somehow None despite the logic above
+        if not self.default_provider:
+            if self.providers: # If there are any providers, pick the first one
+                self.default_provider = list(self.providers.keys())[0]
+                logger.warning(f"Default provider was not set, defaulting to first available: {self.default_provider}")
+            else:
+                # This state should ideally not be reached if LocalFallbackProvider initialization is robust.
+                # As an absolute last resort, try to create LocalFallbackProvider again if providers is empty.
+                try:
+                    logger.error("CRITICAL: No providers available and default_provider is None. "
+                                 "Attempting to force LocalFallbackProvider one last time.")
+                    self.providers['local_fallback'] = LocalFallbackProvider()
+                    self.default_provider = 'local_fallback'
+                except Exception as final_emergency_e:
+                    raise LLMError(f"CRITICAL: Failed to initialize ANY LLM provider, including emergency fallback: {final_emergency_e}")
+
+        logger.info(f"LLMClient initialization finished. Default provider: '{self.default_provider}'. "
+                    f"Available providers: {list(self.providers.keys())}")
     
     async def generate(
         self,

@@ -307,16 +307,40 @@ class BaseAgent(ABC, AdvancedToolWorkflowMixin):
         )
         # 3. Call LLM with timeout
         try:
-            response = await asyncio.wait_for(
+            response_content = await asyncio.wait_for(
                 self.llm_client.generate(
                     prompt=full_prompt,
                     model=self.config.llm_model,
                     temperature=self.config.temperature,
                     max_tokens=self.config.max_tokens,
-                    agent_id=self.agent_id
+                    agent_id=self.agent_id,
+                    correlation_id=context.get("correlation_id", str(uuid.uuid4())) # Pass correlation_id
                 ),
-                timeout=self.config.timeout or 60  # Use config timeout or default to 60 seconds
+                timeout=self.config.timeout or 180  # Use config timeout or default to 180 seconds
             )
+            
+            # Attempt to parse JSON if structured_output is True
+            if structured_output:
+                try:
+                    response = json.loads(response_content)
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"Failed to parse LLM response as JSON: {e}", exc_info=True)
+                    self.logger.debug(f"Raw LLM response content: {response_content}")
+                    # Fallback: return raw content with error information
+                    return {
+                        "error": "JSONDecodeError",
+                        "status": "error",
+                        "response": response_content, # Return the raw string
+                        "reasoning": f"LLM response was not valid JSON. Error: {e}. Raw response included."
+                    }
+            else:
+                # If not structured_output, wrap the string content in a standard dict
+                response = {
+                    "status": "success", # Assuming success if not expecting structured output and no other error
+                    "response": response_content,
+                    "reasoning": "LLM response processed as plain text."
+                }
+
         except asyncio.TimeoutError:
             self.logger.error(f"LLM task execution timed out for agent {self.agent_id}")
             return {
