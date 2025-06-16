@@ -61,8 +61,17 @@ class MockLLMClient:
 class MockMemoryManager:
     """Mock memory manager."""
     
+    def __init__(self, agent_id: str = "test"):
+        self.agent_id = agent_id
+    
     async def store_memory(self, content: str, **kwargs) -> str:
         return f"memory_{hash(content) % 1000}"
+    
+    async def search_memory(self, query: str, **kwargs):
+        return []
+    
+    async def get_relevant_context(self, query: str, **kwargs) -> str:
+        return "Mock context"
 
 # Import the adaptive workflow models
 import sys

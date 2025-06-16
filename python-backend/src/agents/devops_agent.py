@@ -43,7 +43,7 @@ class DevOpsAgent(BaseAgent):
         self,
         config: AgentConfig,
         llm_client: Any,
-        memory_manager: MemoryManager,
+        memory_manager: 'MemoryManager',
         event_bus: EventBus
     ):
         # Override config for DevOps-specific settings

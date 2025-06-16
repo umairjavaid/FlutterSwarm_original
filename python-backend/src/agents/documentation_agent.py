@@ -43,7 +43,7 @@ class DocumentationAgent(BaseAgent):
         self,
         config: AgentConfig,
         llm_client: Any,
-        memory_manager: MemoryManager,
+        memory_manager: 'MemoryManager',
         event_bus: EventBus
     ):
         # Override config for documentation-specific settings

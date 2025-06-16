@@ -4,8 +4,6 @@ Memory management system for FlutterSwarm agents.
 This module provides memory management with text-based search
 and context-aware retrieval.
 """
-import asyncio
-import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
 from collections import defaultdict
@@ -203,13 +201,17 @@ class MemoryManager:
         
         for entry in all_entries.values():
             content_words = set(entry.content.lower().split())
-            intersection = query_words.intersection(content_words)
             
-            if intersection:
-                score = len(intersection) / len(query_words.union(content_words))
-                results.append((entry, score))
-                entry.update_access()
-                self._access_counts[entry.id] += 1
+            # Calculate simple word overlap score
+            common_words = query_words.intersection(content_words)
+            if common_words:
+                score = len(common_words) / len(query_words)
+                # Boost score for exact phrase matches
+                if query.lower() in entry.content.lower():
+                    score += 0.5
+                # Boost score based on importance
+                score *= entry.importance
+                results.append((entry, min(1.0, score)))
         
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:limit]
@@ -218,8 +220,7 @@ class MemoryManager:
         """Build intelligent consolidation prompt for LLM."""
         content_list = []
         for i, entry in enumerate(entries, 1):
-            timestamp = entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-            content_list.append(f"{i}. [{timestamp}] {entry.content}")
+            content_list.append(f"{i}. [{entry.timestamp.isoformat()}] {entry.content}")
         
         return f"""
 Please consolidate the following related memory entries into a single, coherent summary:
@@ -239,8 +240,7 @@ Consolidated Summary:"""
         """Simple consolidation fallback method."""
         contents = []
         for entry in entries:
-            timestamp = entry.timestamp.strftime("%Y-%m-%d %H:%M")
-            contents.append(f"[{timestamp}] {entry.content}")
+            contents.append(f"[{entry.timestamp.isoformat()}] {entry.content}")
         
         return f"CONSOLIDATED MEMORY:\n\n" + "\n\n".join(contents)
     
@@ -254,18 +254,10 @@ Consolidated Summary:"""
             all_keys.update(entry.metadata.keys())
         
         for key in all_keys:
-            values = []
-            for entry in entries:
-                if key in entry.metadata:
-                    value = entry.metadata[key]
-                    if value not in values:
-                        values.append(value)
-            
-            # Store as list if multiple values, single value otherwise
-            if len(values) == 1:
-                merged[key] = values[0]
-            elif len(values) > 1:
-                merged[key] = values
+            values = [entry.metadata.get(key) for entry in entries if key in entry.metadata]
+            if values:
+                # Use most recent non-null value for single values
+                merged[key] = values[-1]
         
         # Add consolidation metadata
         merged['consolidated'] = True
@@ -285,10 +277,7 @@ Consolidated Summary:"""
         for other_entry in all_entries.values():
             if (other_entry.correlation_id == entry.correlation_id and 
                 other_entry.id != entry.id):
-                # Format with timestamp and truncate content
-                timestamp = other_entry.timestamp.strftime("%m/%d %H:%M")
-                content = other_entry.content[:100] + "..." if len(other_entry.content) > 100 else other_entry.content
-                related.append(f"[{timestamp}] {content}")
+                related.append(f"- {other_entry.content[:100]}...")
         
         return "\n".join(related) if related else ""
     
@@ -311,22 +300,12 @@ Consolidated Summary:"""
         
         for entry_id, entry in list(self._short_term_memory.items()):
             if entry.timestamp < ttl_cutoff:
-                # Decide whether to promote to long-term or delete
-                access_count = self._access_counts.get(entry_id, 0)
-                
-                # Promotion criteria: high importance OR frequent access OR has correlations
-                should_promote = (
-                    entry.importance > 0.7 or 
-                    access_count > 3 or
-                    entry.correlation_id is not None
-                )
-                
-                if should_promote:
+                if entry.importance > 0.7 or self._access_counts[entry_id] > 3:
+                    # Promote to long-term
                     self._long_term_memory[entry_id] = entry
                     promoted_entries.append(entry_id)
                 else:
                     expired_entries.append(entry_id)
-                
                 del self._short_term_memory[entry_id]
         
         # Clean up long-term memory if it gets too large
@@ -334,39 +313,22 @@ Consolidated Summary:"""
         max_long_term = max_entries // 2
         
         if len(self._long_term_memory) > max_long_term:
-            # Calculate composite score for each entry
-            scored_entries = []
-            for entry_id, entry in self._long_term_memory.items():
-                access_count = self._access_counts.get(entry_id, 0)
-                age_days = (current_time - entry.timestamp).days
-                
-                # Composite score: importance + access frequency - age penalty
-                score = (
-                    entry.importance * 0.4 +
-                    min(access_count / 10, 0.3) +  # Cap access contribution
-                    (0.3 if entry.correlation_id else 0) -  # Correlation bonus
-                    (age_days * 0.01)  # Age penalty
-                )
-                
-                scored_entries.append((entry_id, score))
+            # Remove least accessed, oldest entries
+            entries_by_access = sorted(
+                self._long_term_memory.items(),
+                key=lambda x: (self._access_counts[x[0]], x[1].timestamp)
+            )
             
-            # Sort by score and remove lowest scoring entries
-            scored_entries.sort(key=lambda x: x[1])
-            remove_count = len(scored_entries) - max_long_term
-            
-            removed_entries = []
-            for entry_id, _ in scored_entries[:remove_count]:
+            to_remove = len(self._long_term_memory) - max_long_term
+            for entry_id, _ in entries_by_access[:to_remove]:
                 del self._long_term_memory[entry_id]
                 if entry_id in self._access_counts:
                     del self._access_counts[entry_id]
-                removed_entries.append(entry_id)
-            
-            logger.debug(f"Removed {len(removed_entries)} low-scoring long-term memories")
         
         self._last_cleanup = current_time
         
         if expired_entries or promoted_entries:
-            logger.info(f"Memory cleanup completed: {len(expired_entries)} expired, {len(promoted_entries)} promoted to long-term")
+            logger.info(f"Memory cleanup: expired {len(expired_entries)}, promoted {len(promoted_entries)}")
     
     def get_statistics(self) -> Dict[str, Any]:
         """Get comprehensive memory system statistics."""
@@ -398,6 +360,44 @@ Consolidated Summary:"""
             "last_cleanup": self._last_cleanup.isoformat(),
             "llm_client_available": self.llm_client is not None
         }
+    
+    async def export_memories(self, correlation_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Export memories for backup or analysis."""
+        all_entries = {**self._short_term_memory, **self._long_term_memory}
+        
+        if correlation_id:
+            entries = [entry for entry in all_entries.values() 
+                      if entry.correlation_id == correlation_id]
+        else:
+            entries = list(all_entries.values())
+        
+        return [entry.to_dict() for entry in entries]
+    
+    async def import_memories(self, memories_data: List[Dict[str, Any]]) -> int:
+        """Import memories from backup data."""
+        imported_count = 0
+        
+        for memory_data in memories_data:
+            try:
+                entry = MemoryEntry.from_dict(memory_data)
+                
+                # Store in appropriate memory layer based on age and importance
+                age_hours = (datetime.utcnow() - entry.timestamp).total_seconds() / 3600
+                is_long_term = age_hours > 24 or entry.importance > 0.7
+                
+                if is_long_term:
+                    self._long_term_memory[entry.id] = entry
+                else:
+                    self._short_term_memory[entry.id] = entry
+                
+                imported_count += 1
+                
+            except Exception as e:
+                logger.error(f"Failed to import memory: {e}")
+                continue
+        
+        logger.info(f"Imported {imported_count} memories")
+        return imported_count
     
     async def export_memories(self, correlation_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Export memories for backup or analysis."""

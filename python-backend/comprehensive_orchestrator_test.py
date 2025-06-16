@@ -588,6 +588,9 @@ class MockEventBus:
 class MockMemoryManager:
     """Mock memory manager for testing."""
     
+    def __init__(self, agent_id: str = "test"):
+        self.agent_id = agent_id
+    
     async def store(self, key: str, data: Any):
         pass
     
@@ -597,10 +600,13 @@ class MockMemoryManager:
     async def update(self, key: str, data: Any):
         pass
     
-    async def store_memory(self, key: str, data: Any):
-        pass
+    async def store_memory(self, content: str, **kwargs):
+        return f"memory_{hash(content) % 1000}"
     
     async def get_memories(self, filter_criteria: Dict = None):
+        return []
+    
+    async def search_memory(self, query: str, **kwargs):
         return []
 
 

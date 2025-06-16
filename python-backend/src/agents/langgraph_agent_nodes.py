@@ -44,7 +44,7 @@ class LangGraphAgentNode:
         agent_class: Type,
         agent_config: Any,
         llm_client: Any,
-        memory_manager: Any,
+        memory_manager: 'MemoryManager',
         event_bus: Any,
         tracer: Optional[LangSmithWorkflowTracer] = None
     ):
