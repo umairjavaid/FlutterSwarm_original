@@ -940,12 +940,14 @@ Generate complete, production-ready code that implements real functionality for 
             main_dart_content = implementation_result.get("main_dart")
             if main_dart_content:
                 main_path = f"{project_path}/lib/main.dart"
+                operation_id = str(uuid.uuid4())
                 result = await file_tool.execute(
                     operation="write_file",
                     params={
                         "path": main_path,
                         "content": main_dart_content
-                    }
+                    },
+                    operation_id=operation_id
                 )
                 if result.status == ToolStatus.SUCCESS:
                     generated_files.append(main_path)
@@ -955,12 +957,14 @@ Generate complete, production-ready code that implements real functionality for 
             pubspec_content = implementation_result.get("pubspec_yaml")
             if pubspec_content:
                 pubspec_path = f"{project_path}/pubspec.yaml"
+                operation_id = str(uuid.uuid4())
                 result = await file_tool.execute(
                     operation="write_file",
                     params={
                         "path": pubspec_path,
                         "content": pubspec_content
-                    }
+                    },
+                    operation_id=operation_id
                 )
                 if result.status == ToolStatus.SUCCESS:
                     generated_files.append(pubspec_path)
@@ -971,12 +975,14 @@ Generate complete, production-ready code that implements real functionality for 
             for file_path, content in files.items():
                 if content and content.strip():  # Only write non-empty files
                     full_path = f"{project_path}/{file_path}"
+                    operation_id = str(uuid.uuid4())
                     result = await file_tool.execute(
                         operation="write_file",
                         params={
                             "path": full_path,
                             "content": content
-                        }
+                        },
+                        operation_id=operation_id
                     )
                     if result.status == ToolStatus.SUCCESS:
                         generated_files.append(full_path)
@@ -1103,106 +1109,157 @@ Generate complete, production-ready code that implements real functionality for 
             "dependencies": []
         }
         
-        # Strategy 1: Look for JSON structure in the text
-        json_match = re.search(r'\{[\s\S]*?"files"[\s\S]*?\}', text)
-        if json_match:
-            try:
-                json_str = json_match.group(0)
-                # Try to clean up incomplete JSON
-                if not json_str.endswith('}'):
-                    # Find the last complete key-value pair
-                    last_comma = json_str.rfind(',')
-                    if last_comma > 0:
-                        json_str = json_str[:last_comma] + '}'
-                
-                parsed_json = json.loads(json_str)
-                if isinstance(parsed_json, dict):
-                    logger.info("Successfully extracted JSON structure from text")
-                    return parsed_json
-            except json.JSONDecodeError as e:
-                logger.debug(f"Failed to parse extracted JSON: {e}")
+        # Strategy 1: Look for JSON structure in the text and try to extract it properly
+        json_patterns = [
+            r'\{[\s\S]*?"main_dart"[\s\S]*?\}(?=\s*```|\s*$)',  # Look for JSON ending before code blocks or end
+            r'```json\s*(\{[\s\S]*?\})\s*```',  # JSON within markdown code blocks
+            r'\{[\s\S]*?"files"[\s\S]*?\}(?=\s*```|\s*[Ii]\'ll|\s*Let me|\s*$)',  # JSON ending before explanatory text
+        ]
         
-        # Strategy 2: Extract code blocks with file names
-        code_block_pattern = r'```(?:dart|yaml)?\s*(?:\n?(?:// )?(?:File: )?([\w/_.]+))?\n(.*?)```'
-        matches = re.findall(code_block_pattern, text, re.DOTALL)
+        for pattern in json_patterns:
+            json_matches = re.findall(pattern, text, re.MULTILINE)
+            for json_match in json_matches:
+                try:
+                    # Clean up the JSON string
+                    json_str = json_match.strip()
+                    if not json_str.startswith('{'):
+                        continue
+                    
+                    # Try to fix truncated JSON by finding the last complete structure
+                    if not json_str.endswith('}'):
+                        # Find the last complete key-value pair or array
+                        last_complete = json_str.rfind('},')
+                        if last_complete > 0:
+                            json_str = json_str[:last_complete + 1] + '}'
+                        elif json_str.rfind('],') > 0:
+                            last_array = json_str.rfind('],')
+                            json_str = json_str[:last_array + 1] + '}'
+                        else:
+                            # Try to close any open strings and objects
+                            json_str = json_str + '"}'
+                    
+                    # Remove any trailing incomplete content
+                    json_str = re.sub(r',\s*\}', '}', json_str)
+                    json_str = re.sub(r',\s*\]', ']', json_str)
+                    
+                    parsed_json = json.loads(json_str)
+                    if isinstance(parsed_json, dict) and ('main_dart' in parsed_json or 'files' in parsed_json):
+                        logger.info("Successfully extracted JSON structure from text")
+                        return parsed_json
+                        
+                except json.JSONDecodeError as e:
+                    logger.debug(f"Failed to parse extracted JSON attempt: {e}")
+                    continue
         
-        for file_path, code_content in matches:
-            code_content = code_content.strip()
+        # Strategy 2: Extract individual file sections more carefully
+        # Look for file markers like "lib/screens/home_screen.dart": "content"
+        file_pattern = r'"(lib/[^"]+\.dart|pubspec\.yaml)"\s*:\s*"([^"]*(?:\\.[^"]*)*)"'
+        file_matches = re.findall(file_pattern, text, re.DOTALL)
+        
+        for file_path, content in file_matches:
+            # Unescape the content
+            content = content.replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t')
             
-            if not file_path:
-                # Try to determine file type from content
-                if "main(" in code_content or "runApp(" in code_content:
-                    file_path = "lib/main.dart"
-                elif "name:" in code_content and "dependencies:" in code_content:
-                    file_path = "pubspec.yaml"
-                elif "class " in code_content and "Widget" in code_content:
-                    # Extract class name for widget files
-                    class_match = re.search(r'class\s+(\w+)', code_content)
-                    if class_match:
-                        class_name = class_match.group(1)
-                        file_path = f"lib/widgets/{class_name.lower()}.dart"
-                    else:
-                        file_path = f"lib/unknown_{len(result['files'])}.dart"
-                else:
-                    file_path = f"lib/unknown_{len(result['files'])}.dart"
-            
-            # Clean up file path
-            file_path = file_path.strip("/ ")
-            
-            if file_path.endswith("main.dart"):
-                result["main_dart"] = code_content
-                result["files"]["lib/main.dart"] = code_content
-            elif file_path.endswith("pubspec.yaml"):
-                result["pubspec_yaml"] = code_content
-                result["files"]["pubspec.yaml"] = code_content
+            if file_path.endswith('main.dart'):
+                result["main_dart"] = content
+                result["files"]["lib/main.dart"] = content
+            elif file_path.endswith('pubspec.yaml'):
+                result["pubspec_yaml"] = content
+                result["files"]["pubspec.yaml"] = content
             else:
-                result["files"][file_path] = code_content
+                result["files"][file_path] = content
         
-        # Strategy 3: If no code blocks found, look for structured content
+        # Strategy 3: Extract code blocks by file type/content hints
         if not result["files"]:
-            # Look for main.dart content
-            main_patterns = [
-                r'(?:main\.dart[:\s]*)(.*?)(?=\n\s*(?:pubspec\.yaml|lib/|$))',
-                r'(?:import\s+[\'"]flutter/material\.dart[\'"];.*?)(?=\n\s*(?:pubspec\.yaml|lib/|$))',
-            ]
+            # Find all code blocks
+            code_block_pattern = r'```(?:dart|yaml)?\s*(?:\n?(?:// )?(?:File: )?([\w/_.]+))?\n(.*?)```'
+            matches = re.findall(code_block_pattern, text, re.DOTALL)
             
-            for pattern in main_patterns:
-                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-                if match:
-                    main_content = match.group(1 if '(' in pattern else 0).strip()
-                    if len(main_content) > 100:  # Reasonable size check
-                        result["main_dart"] = main_content
-                        result["files"]["lib/main.dart"] = main_content
-                        break
+            processed_files = set()
             
-            # Look for pubspec.yaml content
-            pubspec_patterns = [
-                r'(?:pubspec\.yaml[:\s]*)(.*?)(?=\n\s*(?:lib/|dependencies:|$))',
-                r'(name:\s*\w+.*?(?=\n\s*(?:lib/|$)))',
-            ]
-            
-            for pattern in pubspec_patterns:
-                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-                if match:
-                    pubspec_content = match.group(1).strip()
-                    if "dependencies:" in pubspec_content and len(pubspec_content) > 50:
-                        result["pubspec_yaml"] = pubspec_content
-                        result["files"]["pubspec.yaml"] = pubspec_content
-                        break
+            for file_path, code_content in matches:
+                code_content = code_content.strip()
+                
+                # Skip if we already processed this exact content
+                content_hash = hash(code_content)
+                if content_hash in processed_files:
+                    continue
+                processed_files.add(content_hash)
+                
+                if not file_path:
+                    # Determine file type from content
+                    if "void main(" in code_content and "runApp(" in code_content:
+                        file_path = "lib/main.dart"
+                    elif "name:" in code_content and "dependencies:" in code_content and "flutter:" in code_content:
+                        file_path = "pubspec.yaml"
+                    elif "class " in code_content and "extends State" in code_content:
+                        # Extract class name for screen files
+                        class_match = re.search(r'class\s+(\w+)', code_content)
+                        if class_match:
+                            class_name = class_match.group(1)
+                            if "Screen" in class_name:
+                                file_path = f"lib/screens/{class_name.lower()}.dart"
+                            elif "Widget" in class_name or "State" in class_name:
+                                file_path = f"lib/widgets/{class_name.lower().replace('state', '').replace('widget', '')}.dart"
+                            else:
+                                file_path = f"lib/widgets/{class_name.lower()}.dart"
+                    elif "class " in code_content and ("Bloc" in code_content or "Cubit" in code_content):
+                        class_match = re.search(r'class\s+(\w+)', code_content)
+                        if class_match:
+                            class_name = class_match.group(1)
+                            file_path = f"lib/state/{class_name.lower()}.dart"
+                    elif "class " in code_content and "Service" in code_content:
+                        class_match = re.search(r'class\s+(\w+)', code_content)
+                        if class_match:
+                            class_name = class_match.group(1)
+                            file_path = f"lib/services/{class_name.lower()}.dart"
+                    elif "class " in code_content:
+                        class_match = re.search(r'class\s+(\w+)', code_content)
+                        if class_match:
+                            class_name = class_match.group(1)
+                            file_path = f"lib/models/{class_name.lower()}.dart"
+                    else:
+                        continue  # Skip unidentifiable content
+                
+                # Clean up file path
+                file_path = file_path.strip("/ ")
+                
+                # Only add if content is substantial and not a duplicate
+                if len(code_content) > 50 and file_path not in result["files"]:
+                    if file_path.endswith("main.dart"):
+                        result["main_dart"] = code_content
+                        result["files"]["lib/main.dart"] = code_content
+                    elif file_path.endswith("pubspec.yaml"):
+                        result["pubspec_yaml"] = code_content
+                        result["files"]["pubspec.yaml"] = code_content
+                    else:
+                        result["files"][file_path] = code_content
         
-        # Strategy 4: If still no content, create a basic structure from any Dart-like content
-        if not result["files"]:
-            dart_content_pattern = r'(class\s+\w+.*?{[\s\S]*?}|void\s+main\s*\(.*?{[\s\S]*?}|import\s+[\'"][^\'"]*[\'"];)'
-            dart_matches = re.findall(dart_content_pattern, text, re.MULTILINE)
-            
-            if dart_matches:
-                # Combine all Dart content
-                combined_content = "\n".join(dart_matches)
-                if len(combined_content) > 50:
-                    result["main_dart"] = combined_content
-                    result["files"]["lib/main.dart"] = combined_content
+        # Strategy 4: Extract direct field values if they exist
+        if not result["main_dart"]:
+            main_dart_pattern = r'"main_dart"\s*:\s*"([^"]*(?:\\.[^"]*)*)"'
+            main_match = re.search(main_dart_pattern, text, re.DOTALL)
+            if main_match:
+                main_content = main_match.group(1).replace('\\"', '"').replace('\\n', '\n')
+                if len(main_content) > 50:
+                    result["main_dart"] = main_content
+                    result["files"]["lib/main.dart"] = main_content
+        
+        if not result["pubspec_yaml"]:
+            pubspec_pattern = r'"pubspec_yaml"\s*:\s*"([^"]*(?:\\.[^"]*)*)"'
+            pubspec_match = re.search(pubspec_pattern, text, re.DOTALL)
+            if pubspec_match:
+                pubspec_content = pubspec_match.group(1).replace('\\"', '"').replace('\\n', '\n')
+                if "dependencies:" in pubspec_content and len(pubspec_content) > 50:
+                    result["pubspec_yaml"] = pubspec_content
+                    result["files"]["pubspec.yaml"] = pubspec_content
         
         logger.info(f"Extracted {len(result['files'])} files from text response")
+        
+        # Log the extracted files for debugging
+        for file_path in result["files"].keys():
+            logger.info(f"Extracted file: {file_path}")
+        
         return result
 
     def _create_fallback_implementation(self) -> Dict[str, Any]:

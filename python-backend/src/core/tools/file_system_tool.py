@@ -523,21 +523,21 @@ class FileSystemTool(BaseTool):
                 self.gitignore_patterns = self._load_gitignore_patterns(project_path)
             
             if operation == "read_file":
-                return await self._read_file(params)
+                return await self._read_file(params, operation_id)
             elif operation == "write_file":
-                return await self._write_file(params)
+                return await self._write_file(params, operation_id)
             elif operation == "create_from_template":
-                return await self._create_from_template(params)
+                return await self._create_from_template(params, operation_id)
             elif operation == "manage_pubspec":
-                return await self._manage_pubspec(params)
+                return await self._manage_pubspec(params, operation_id)
             elif operation == "optimize_assets":
-                return await self._optimize_assets(params)
+                return await self._optimize_assets(params, operation_id)
             elif operation == "create_barrel_exports":
-                return await self._create_barrel_exports(params)
+                return await self._create_barrel_exports(params, operation_id)
             elif operation == "batch_operation":
-                return await self._batch_operation(params)
+                return await self._batch_operation(params, operation_id)
             elif operation == "analyze_project_structure":
-                return await self._analyze_project_structure(params)
+                return await self._analyze_project_structure(params, operation_id)
             elif operation == "setup_file_watcher":
                 return await self._setup_file_watcher(params)
             elif operation == "validate_flutter_conventions":
@@ -570,7 +570,7 @@ class FileSystemTool(BaseTool):
         
         return None
 
-    async def _read_file(self, params: Dict[str, Any]) -> ToolResult:
+    async def _read_file(self, params: Dict[str, Any], operation_id: Optional[str] = None) -> ToolResult:
         """Read file implementation with Flutter-specific analysis."""
         path = Path(params["path"])
         encoding = params.get("encoding", "utf-8")
@@ -594,12 +594,14 @@ class FileSystemTool(BaseTool):
                 result_data["import_analysis"] = import_analysis
             
             return ToolResult(
+                operation_id=operation_id or "",
                 status=ToolStatus.SUCCESS,
                 data=result_data,
                 execution_time=0.01
             )
         except Exception as e:
             return ToolResult(
+                operation_id=operation_id or "",
                 status=ToolStatus.FAILURE,
                 data={},
                 error_message=f"Failed to read file {path}: {str(e)}"
@@ -634,7 +636,7 @@ class FileSystemTool(BaseTool):
         
         return imports
 
-    async def _write_file(self, params: Dict[str, Any]) -> ToolResult:
+    async def _write_file(self, params: Dict[str, Any], operation_id: Optional[str] = None) -> ToolResult:
         """Write file implementation with backup, validation, and optimization."""
         path = Path(params["path"])
         content = params["content"]
@@ -669,6 +671,7 @@ class FileSystemTool(BaseTool):
             validation_result["flutter_valid"] = True
             
             return ToolResult(
+                operation_id=operation_id or "",
                 status=ToolStatus.SUCCESS,
                 data={
                     "written": True,
@@ -679,6 +682,7 @@ class FileSystemTool(BaseTool):
             
         except Exception as e:
             return ToolResult(
+                operation_id=operation_id or "",
                 status=ToolStatus.FAILURE,
                 data={},
                 error_message=f"Failed to write file {path}: {str(e)}"
@@ -905,5 +909,20 @@ class FileSystemTool(BaseTool):
             status=ToolStatus.SUCCESS,
             data={"message": "Convention validation not yet implemented"},
             execution_time=0.01
+        )
+
+    def _create_tool_result(self, 
+                           status: ToolStatus, 
+                           data: Any = None, 
+                           error_message: Optional[str] = None,
+                           execution_time: float = 0.0,
+                           operation_id: Optional[str] = None) -> ToolResult:
+        """Helper method to create ToolResult with proper operation_id."""
+        return ToolResult(
+            operation_id=operation_id or "",
+            status=status,
+            data=data or {},
+            error_message=error_message,
+            execution_time=execution_time
         )
 
