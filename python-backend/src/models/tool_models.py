@@ -154,17 +154,18 @@ class AsyncTask:
             self.metadata.update(metadata)
 
 
+
 @dataclass
 class ToolOperation:
     """Represents a tool operation request."""
-    operation_id: str = field(default_factory=lambda: str(uuid4()))
     tool_name: str = ""
     operation: str = ""
+    agent_id: str = ""
+    reasoning: str = ""
+    operation_id: str = field(default_factory=lambda: str(uuid4()))
     parameters: Dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
-    agent_id: str = ""
     context: Dict[str, Any] = field(default_factory=dict)
-    reasoning: str = ""
 
 
 @dataclass
@@ -175,9 +176,46 @@ class ToolResult:
     data: Any = None
     error_message: Optional[str] = None
     execution_time: float = 0.0
+    error_code: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
     resource_usage: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
+    
+    def __post_init__(self):
+        """Post-initialization to set default timestamps."""
+        if self.start_time is None:
+            self.start_time = datetime.now()
+        
+        # Generate operation_id if not provided
+        if not self.operation_id:
+            self.operation_id = str(uuid4())
+    
+    def mark_completed(self) -> None:
+        """Mark the operation as completed and calculate execution time."""
+        self.end_time = datetime.now()
+        if self.start_time:
+            delta = self.end_time - self.start_time
+            self.execution_time = delta.total_seconds()
+    
+    def add_error(self, error_message: str) -> None:
+        """Add an error message and update status if needed."""
+        self.error_message = error_message
+        if self.status == ToolStatus.SUCCESS:
+            self.status = ToolStatus.FAILURE
+    
+    def add_warning(self, warning_message: str) -> None:
+        """Add a warning message."""
+        self.warnings.append(warning_message)
+    
+    def is_successful(self) -> bool:
+        """Check if the operation was successful."""
+        return self.status in [ToolStatus.SUCCESS, ToolStatus.PARTIAL_SUCCESS]
+    
+    def has_errors(self) -> bool:
+        """Check if the operation has any errors."""
+        return self.status == ToolStatus.FAILURE or bool(self.error_message)
 
 
 class ToolCapability(Enum):

@@ -5,6 +5,7 @@ This test verifies the new project-aware code generation features
 without complex module dependencies.
 """
 import asyncio
+import sys
 import tempfile
 import re
 from pathlib import Path
@@ -13,6 +14,11 @@ from unittest.mock import Mock, AsyncMock
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
+import sys
+
+# Import the proper ToolStatus and ToolResult from src/models/tool_models.py
+sys.path.insert(0, str(Path(__file__).parent))
+from src.models.tool_models import ToolStatus, ToolResult
 
 
 # Minimal model definitions for testing
@@ -67,19 +73,6 @@ class CodeUnderstanding:
     quality_indicators: Dict[str, Any] = field(default_factory=dict)
     suggestions: List[str] = field(default_factory=list)
     analyzed_at: datetime = field(default_factory=datetime.utcnow)
-
-
-class ToolStatus(Enum):
-    SUCCESS = "success"
-    FAILURE = "failure"
-
-
-@dataclass
-class ToolResult:
-    operation_id: str
-    status: ToolStatus
-    data: Any = None
-    error_message: Optional[str] = None
 
 
 # Simplified Implementation Agent methods for testing
@@ -475,6 +468,14 @@ async def run_code_understanding_tests():
     print("\n📊 Test Summary:")
     print("   • Code type detection: 9/9 scenarios ✓")
     print("   • Structure extraction: All components ✓")
+    print("   • Pattern detection: Widget patterns ✓")
+    print("   • Convention analysis: Naming & imports ✓")
+    print("   • Dependency extraction: All packages ✓")
+    print("   • Complexity metrics: All metrics ✓")
+
+
+if __name__ == "__main__":
+    asyncio.run(run_code_understanding_tests())
     print("   • Pattern detection: Widget patterns ✓")
     print("   • Convention analysis: Naming & imports ✓")
     print("   • Dependency extraction: All packages ✓")

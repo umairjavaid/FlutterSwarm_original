@@ -14,9 +14,8 @@ import re
 
 from .base_tool import (
     BaseTool, ToolCategory, ToolPermission, ToolCapabilities, 
-    ToolResult, ToolStatus
+    ToolResult, ToolStatus, ToolOperation, ToolValidation, ToolUsageExample
 )
-from .tool_models import ToolOperation
 from ...config import get_logger
 
 logger = get_logger("git_tool")

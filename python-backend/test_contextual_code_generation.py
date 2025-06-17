@@ -6,13 +6,10 @@ This test verifies that the agent can intelligently analyze existing Flutter pro
 understand patterns and conventions, and generate code that seamlessly integrates
 with the existing codebase.
 """
-
-import asyncio
-import json
-import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+import sys
+import json  # Add missing import
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))

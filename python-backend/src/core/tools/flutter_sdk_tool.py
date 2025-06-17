@@ -21,8 +21,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from .base_tool import (
-    BaseTool, ToolCapabilities, ToolOperation, ToolPermission, 
-    ToolResult, ToolStatus, ToolCategory
+    BaseTool, ToolCategory
+)
+from ...models.tool_models import (
+    ToolCapabilities, ToolOperation, ToolPermission, 
+    ToolResult, ToolStatus
 )
 
 logger = logging.getLogger(__name__)

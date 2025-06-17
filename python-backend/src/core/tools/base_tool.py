@@ -19,7 +19,7 @@ import uuid
 from ...config import get_logger
 from ...models.tool_models import (
     ToolStatus, ToolPermission, ToolOperation, ToolResult, ToolCapabilities,
-    ToolUsageEntry, ToolMetrics
+    ToolUsageEntry, ToolMetrics, ToolValidation, ToolUsageExample
 )
 
 logger = get_logger("base_tool")
