@@ -290,6 +290,9 @@ class TaskResult:
     execution_time: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     completed_at: datetime = field(default_factory=datetime.utcnow)
+    deliverables: Dict[str, Any] = field(default_factory=dict)
+    metrics: Dict[str, Any] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
     
     def is_successful(self) -> bool:
         """Check if task completed successfully."""
@@ -306,7 +309,10 @@ class TaskResult:
             "execution_time": self.execution_time,
             "metadata": self.metadata,
             "completed_at": self.completed_at.isoformat(),
-            "successful": self.is_successful()
+            "successful": self.is_successful(),
+            "deliverables": self.deliverables,
+            "metrics": self.metrics,
+            "errors": self.errors
         }
 
 

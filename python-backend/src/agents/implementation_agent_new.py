@@ -13,12 +13,13 @@ from datetime import datetime
 from .base_agent import BaseAgent, AgentCapability, AgentConfig
 from ..core.event_bus import EventBus
 from ..core.memory_manager import MemoryManager
-from ..models.agent_models import AgentMessage, TaskResult
+from ..models.agent_models import AgentMessage, TaskResult, TaskStatus
 from ..models.task_models import TaskContext
 from ..models.project_models import (
     ProjectContext, ArchitecturePattern, PlatformTarget, 
     ProjectType, CodeMetrics
 )
+from ..models.tool_models import ToolStatus
 from ..config import get_logger
 
 logger = get_logger("implementation_agent")
@@ -633,3 +634,292 @@ Provide complete, production-ready Flutter UI code with proper documentation.
             "responsive_widgets": ["Flexible", "Expanded", "Wrap", "FittedBox"],
             "breakpoint_system": {"xs": 0, "sm": 576, "md": 768, "lg": 992, "xl": 1200}
         }
+
+    async def process_task(self, task_context: TaskContext) -> TaskResult:
+        """Process implementation tasks and generate real Flutter features."""
+        logger.info(f"Processing implementation task: {task_context.task_id}")
+        
+        try:
+            # Ensure tools are available
+            if not self.available_tools:
+                await self.discover_available_tools()
+            
+            # Extract project details from task context
+            metadata = task_context.metadata
+            project_name = metadata.get("project_name", "flutter_app")
+            features = metadata.get("features", [])
+            output_dir = metadata.get("output_dir", ".")
+            task_type = task_context.description.lower()
+            
+            # Normalize project name for Flutter SDK compliance
+            normalized_project_name = project_name.lower().replace(" ", "_").replace("-", "_")
+            # Remove any non-alphanumeric characters except underscores
+            import re
+            normalized_project_name = re.sub(r'[^a-z0-9_]', '', normalized_project_name)
+            
+            logger.info(f"Implementing task: {task_context.description}")
+            logger.info(f"Project: {project_name} (normalized: {normalized_project_name}), Features: {features}")
+            
+            # Determine task type and route to appropriate handler
+            if "project_setup" in task_type or "create flutter project" in task_type:
+                result = await self._handle_project_setup(task_context, normalized_project_name, output_dir)
+            elif "feature_implementation" in task_type or "implement features" in task_type:
+                result = await self._handle_feature_implementation(task_context, normalized_project_name, features, output_dir)
+            else:
+                # Default to feature implementation
+                result = await self._handle_feature_implementation(task_context, normalized_project_name, features, output_dir)
+            
+            # Create task result
+            task_result = TaskResult(
+                task_id=task_context.task_id,
+                agent_id=self.agent_id,
+                status=TaskStatus.COMPLETED,
+                result=result,
+                deliverables=result.get("deliverables", {}),
+                metrics=result.get("metrics", {}),
+                metadata=result.get("metadata", {}),
+                errors=result.get("errors", [])
+            )
+            
+            logger.info(f"Successfully completed implementation task: {task_context.task_id}")
+            return task_result
+            
+        except Exception as e:
+            logger.error(f"Implementation task failed: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            return TaskResult(
+                task_id=task_context.task_id,
+                agent_id=self.agent_id,
+                status=TaskStatus.FAILED,
+                result={"error": str(e)},
+                deliverables={},
+                metrics={},
+                metadata={},
+                errors=[str(e)]
+            )
+
+    async def _handle_project_setup(self, task_context: TaskContext, project_name: str, output_dir: str) -> Dict[str, Any]:
+        """Handle Flutter project creation and setup."""
+        logger.info(f"Setting up Flutter project: {project_name}")
+        
+        try:
+            # Use Flutter SDK tool to create the project
+            flutter_tool = None
+            for tool_name, tool_instance in self.available_tools.items():
+                if tool_name in ["flutter_sdk", "flutter_sdk_tool"]:
+                    flutter_tool = tool_instance
+                    break
+            
+            if not flutter_tool:
+                logger.warning("Flutter SDK tool not found, attempting to discover tools again")
+                await self.discover_available_tools()
+                for tool_name, tool_instance in self.available_tools.items():
+                    if tool_name in ["flutter_sdk", "flutter_sdk_tool"]:
+                        flutter_tool = tool_instance
+                        break
+            
+            if not flutter_tool:
+                raise ValueError("Flutter SDK tool not available")
+            
+            # Create the Flutter project
+            create_result = await flutter_tool.execute(
+                operation="create_project",
+                params={
+                    "project_name": project_name,
+                    "description": f"Flutter app: {project_name}",
+                    "platforms": ["android", "ios", "web"],
+                    "project_dir": output_dir
+                }
+            )
+            
+            if create_result.status != ToolStatus.SUCCESS:
+                raise ValueError(f"Failed to create Flutter project: {create_result.error_message}")
+            
+            project_path = create_result.data.get("project_path")
+            logger.info(f"Flutter project created at: {project_path}")
+            
+            return {
+                "status": "completed",
+                "project_path": project_path,
+                "deliverables": {
+                    "project_structure": project_path,
+                    "pubspec_yaml": f"{project_path}/pubspec.yaml",
+                    "main_dart": f"{project_path}/lib/main.dart"
+                },
+                "metadata": {
+                    "project_name": project_name,
+                    "platforms": ["android", "ios", "web"]
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Project setup failed: {e}")
+            raise
+
+    async def _handle_feature_implementation(self, task_context: TaskContext, project_name: str, features: List[str], output_dir: str) -> Dict[str, Any]:
+        """Handle implementation of specific Flutter features."""
+        logger.info(f"Implementing features {features} for project {project_name}")
+        
+        try:
+            # Create feature implementation prompt
+            feature_prompt = self._create_feature_implementation_prompt(project_name, features)
+            
+            # Generate Flutter code using LLM
+            implementation_result = await self.execute_llm_task(
+                user_prompt=feature_prompt,
+                context={
+                    "project_name": project_name,
+                    "features": features,
+                    "patterns": self.flutter_patterns
+                },
+                structured_output=True
+            )
+            
+            # Write generated code to files
+            project_path = f"{output_dir}/{project_name}"
+            generated_files = await self._write_feature_code(project_path, implementation_result)
+            
+            return {
+                "status": "completed",
+                "generated_files": generated_files,
+                "deliverables": {
+                    "main_dart": f"{project_path}/lib/main.dart",
+                    "feature_widgets": f"{project_path}/lib/widgets/",
+                    "state_management": f"{project_path}/lib/state/"
+                },
+                "metadata": {
+                    "features_implemented": features,
+                    "files_count": len(generated_files)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Feature implementation failed: {e}")
+            raise
+
+    def _create_feature_implementation_prompt(self, project_name: str, features: List[str]) -> str:
+        """Create a comprehensive prompt for implementing Flutter features."""
+        features_text = ", ".join(features) if features else "basic mobile app functionality"
+        
+        return f"""
+You are an expert Flutter developer. Generate a complete, feature-rich Flutter application for "{project_name}" with the following features: {features_text}.
+
+REQUIREMENTS:
+1. Create a fully functional Flutter app with real features, not just a counter template
+2. Implement all requested features with proper UI and functionality
+3. Use modern Flutter best practices and patterns
+4. Include proper state management (BLoC, Provider, or similar)
+5. Add navigation between different screens/features
+6. Include proper error handling and loading states
+7. Use appropriate Flutter packages for enhanced functionality
+
+FEATURES TO IMPLEMENT:
+{self._generate_feature_specifications(features)}
+
+OUTPUT FORMAT:
+Return a JSON object with the following structure:
+{{
+    "main_dart": "// Complete main.dart file content",
+    "pubspec_yaml": "// Complete pubspec.yaml with dependencies",
+    "files": {{
+        "lib/screens/home_screen.dart": "// Home screen implementation",
+        "lib/screens/[feature]_screen.dart": "// Feature-specific screens",
+        "lib/widgets/[widget_name].dart": "// Custom widgets",
+        "lib/models/[model_name].dart": "// Data models",
+        "lib/services/[service_name].dart": "// Services and business logic",
+        "lib/state/[state_name].dart": "// State management"
+    }},
+    "dependencies": ["list", "of", "flutter", "packages"],
+    "setup_instructions": ["step by step setup instructions"],
+    "features_implemented": ["list of implemented features"]
+}}
+
+Generate complete, production-ready code that implements real functionality for the requested features.
+"""
+
+    def _generate_feature_specifications(self, features: List[str]) -> str:
+        """Generate detailed specifications for each feature."""
+        if not features:
+            return "- Basic mobile app with navigation and UI components"
+        
+        feature_specs = []
+        
+        for feature in features:
+            if "photo" in feature.lower() or "image" in feature.lower():
+                feature_specs.append("- Photo sharing: Camera integration, image picker, photo gallery, upload functionality")
+            elif "auth" in feature.lower() or "login" in feature.lower():
+                feature_specs.append("- User authentication: Login/register screens, form validation, secure authentication")
+            elif "social" in feature.lower() or "chat" in feature.lower() or "messag" in feature.lower():
+                feature_specs.append("- Social features: User profiles, messaging interface, social interactions")
+            elif "music" in feature.lower() or "audio" in feature.lower():
+                feature_specs.append("- Music player: Audio playback, playlist management, music controls")
+            elif "ecommerce" in feature.lower() or "shop" in feature.lower():
+                feature_specs.append("- E-commerce: Product catalog, shopping cart, checkout process")
+            elif "weather" in feature.lower():
+                feature_specs.append("- Weather app: Location-based weather, forecasts, weather data display")
+            else:
+                feature_specs.append(f"- {feature}: Implement comprehensive functionality for {feature}")
+        
+        return "\n".join(feature_specs)
+
+    async def _write_feature_code(self, project_path: str, implementation_result: Dict[str, Any]) -> List[str]:
+        """Write generated code to Flutter project files."""
+        generated_files = []
+        
+        try:
+            # Use file system tool to write files
+            file_tool = None
+            for tool_name, tool_instance in self.available_tools.items():
+                if tool_name == "file_system":
+                    file_tool = tool_instance
+                    break
+            
+            if not file_tool:
+                logger.warning("File system tool not available, skipping file writing")
+                return []
+            
+            # Write main.dart
+            if "main_dart" in implementation_result:
+                main_path = f"{project_path}/lib/main.dart"
+                await file_tool.execute_operation(
+                    operation="write_file",
+                    params={
+                        "file_path": main_path,
+                        "content": implementation_result["main_dart"]
+                    }
+                )
+                generated_files.append(main_path)
+            
+            # Write pubspec.yaml
+            if "pubspec_yaml" in implementation_result:
+                pubspec_path = f"{project_path}/pubspec.yaml"
+                await file_tool.execute_operation(
+                    operation="write_file",
+                    params={
+                        "file_path": pubspec_path,
+                        "content": implementation_result["pubspec_yaml"]
+                    }
+                )
+                generated_files.append(pubspec_path)
+            
+            # Write additional files
+            files = implementation_result.get("files", {})
+            for file_path, content in files.items():
+                full_path = f"{project_path}/{file_path}"
+                await file_tool.execute_operation(
+                    operation="write_file",
+                    params={
+                        "file_path": full_path,
+                        "content": content
+                    }
+                )
+                generated_files.append(full_path)
+            
+            logger.info(f"Generated {len(generated_files)} files for Flutter project")
+            return generated_files
+            
+        except Exception as e:
+            logger.error(f"Failed to write feature code: {e}")
+            return []

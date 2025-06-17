@@ -373,41 +373,58 @@ class FlutterSwarmCLI:
             
             supervisor = system  # The system instance is the supervisor itself
             
-            # Create task context for the project creation
-            from src.models.task_models import TaskContext, TaskType
-            from src.models.langgraph_models import WorkflowState
-            
-            task_context = TaskContext(
-                task_id=f"create_{project_name}",
-                task_type=TaskType.FLUTTER_PROJECT,
-                description=f"Create a Flutter app: {project_name}",
-                requirements=requirements,
-                metadata={
-                    "project_name": project_name,
-                    "project_type": project_type,
-                    "output_dir": flutter_projects_dir
-                }
-            )
-            
-            # Create initial workflow state as a dictionary
+            # Create initial workflow state as a dictionary with proper task decomposition
             initial_state = {
                 "workflow_id": f"create_{project_name}",
-                "task_description": f"Create a Flutter app: {project_name}",
+                "task_description": f"Create a Flutter app: {project_name} with features: {', '.join(requirements.get('features', []))}",
                 "project_context": {
                     "project_name": project_name,
                     "project_type": project_type,
                     "output_dir": flutter_projects_dir,
-                    "requirements": requirements
+                    "requirements": requirements,
+                    "features": requirements.get('features', []),
+                    "complexity": requirements.get('complexity', 'simple')
                 },
                 "messages": [],
-                "available_agents": {},
+                "available_agents": {
+                    "architecture_agent": {"status": "available", "capabilities": ["architecture_analysis", "code_generation"]},
+                    "implementation_agent": {"status": "available", "capabilities": ["code_generation", "file_operations"]}
+                },
                 "agent_assignments": {},
-                "pending_tasks": [],
+                "pending_tasks": [
+                    {
+                        "task_id": "architecture_design",
+                        "description": f"Design architecture for {project_name} with features: {', '.join(requirements.get('features', []))}",
+                        "agent_type": "architecture",
+                        "priority": "high",
+                        "estimated_duration": 30,
+                        "dependencies": [],
+                        "deliverables": ["architecture_diagram", "technical_specifications", "dependency_list"]
+                    },
+                    {
+                        "task_id": "project_setup",
+                        "description": f"Create Flutter project structure for {project_name}",
+                        "agent_type": "implementation", 
+                        "priority": "high",
+                        "estimated_duration": 15,
+                        "dependencies": [],
+                        "deliverables": ["project_structure", "pubspec_yaml"]
+                    },
+                    {
+                        "task_id": "feature_implementation",
+                        "description": f"Implement features: {', '.join(requirements.get('features', []))} in {project_name}",
+                        "agent_type": "implementation",
+                        "priority": "high", 
+                        "estimated_duration": 60,
+                        "dependencies": ["architecture_design", "project_setup"],
+                        "deliverables": ["main_dart", "feature_widgets", "state_management"]
+                    }
+                ],
                 "active_tasks": {},
                 "completed_tasks": {},
                 "failed_tasks": {},
                 "deliverables": {},
-                "workflow_metadata": {},
+                "workflow_metadata": {"phase": "task_decomposition"},
                 "should_continue": True,
                 "execution_metrics": {}
             }

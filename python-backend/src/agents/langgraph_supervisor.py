@@ -321,43 +321,70 @@ class SupervisorAgent:
             # Get active tasks for this agent
             active_tasks = state.get("active_tasks", {})
             agent_assignments = state.get("agent_assignments", {})
+            project_context = state.get("project_context", {})
             
             # Find a task assigned to this agent
             task_to_process = None
-            for task_id, agent_id in agent_assignments.items():
-                if agent_id == agent.config.agent_id and task_id in active_tasks:
-                    task_to_process = active_tasks[task_id]
+            task_id = None
+            for tid, agent_id in agent_assignments.items():
+                if agent_id == agent.config.agent_id and tid in active_tasks:
+                    task_to_process = active_tasks[tid]
+                    task_id = tid
                     break
             
             if task_to_process:
                 try:
-                    # Create task context from the task info
+                    # Create comprehensive task context with project requirements
                     from ..models.task_models import TaskContext, TaskType
+                    
+                    # Extract project details and features
+                    project_name = project_context.get("project_name", "flutter_app")
+                    features = project_context.get("features", [])
+                    requirements = project_context.get("requirements", {})
+                    output_dir = project_context.get("output_dir", ".")
                     
                     task_context = TaskContext(
                         task_id=task_to_process.get("task_id", "unknown"),
                         description=task_to_process.get("description", ""),
-                        task_type=TaskType.ANALYSIS,  # Default task type
+                        task_type=self._map_task_type(task_to_process.get("agent_type", "implementation")),
+                        parameters=requirements,
+                        dependencies=task_to_process.get("dependencies", []),
                         metadata={
                             "priority": task_to_process.get("priority", "normal"),
                             "agent_type": task_to_process.get("agent_type", "implementation"),
-                            "project_id": "music_streaming_app",
+                            "project_name": project_name,
+                            "features": features,
+                            "output_dir": output_dir,
+                            "deliverables": task_to_process.get("deliverables", []),
+                            "requirements": requirements,
                             "correlation_id": f"supervisor_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
                         }
                     )
                     
+                    # Mark task as in progress
+                    active_tasks[task_id]["status"] = "in_progress"
+                    active_tasks[task_id]["progress"] = 0.1
+                    active_tasks[task_id]["started_at"] = datetime.utcnow().isoformat()
+                    
+                    logger.info(f"Processing task {task_id} with agent {agent.config.agent_id}")
+                    logger.info(f"Task description: {task_context.description}")
+                    logger.info(f"Project features: {features}")
+                    
                     # Process the task using the agent with timeout
                     result = await asyncio.wait_for(
                         agent.process_task(task_context),
-                        timeout=120  # 2 minute timeout for agent processing
+                        timeout=300  # 5 minute timeout for agent processing
                     )
                     
                     # Update state with completed task
                     completed_tasks = state.get("completed_tasks", {})
                     completed_tasks[task_id] = {
+                        **task_to_process,
                         "result": result,
                         "agent": agent.config.agent_id,
-                        "completed_at": datetime.now().isoformat()
+                        "status": "completed",
+                        "progress": 1.0,
+                        "completed_at": datetime.utcnow().isoformat()
                     }
                     
                     # Remove from active tasks
@@ -367,11 +394,13 @@ class SupervisorAgent:
                     state["completed_tasks"] = completed_tasks
                     state["active_tasks"] = active_tasks
                     
+                    logger.info(f"Agent {agent.config.agent_id} successfully completed task {task_id}")
+                    
                 except asyncio.TimeoutError:
-                    logger.error(f"Agent {agent.config.agent_id} timed out processing task {task_to_process.get('task_id')}")
+                    logger.error(f"Agent {agent.config.agent_id} timed out processing task {task_id}")
                     # Mark task as failed due to timeout
                     failed_tasks = state.get("failed_tasks", {})
-                    failed_tasks[task_to_process.get("task_id")] = {
+                    failed_tasks[task_id] = {
                         **task_to_process,
                         "status": "failed",
                         "error": "Agent processing timeout",
@@ -379,17 +408,20 @@ class SupervisorAgent:
                     }
                     
                     # Remove from active tasks
-                    if task_to_process.get("task_id") in active_tasks:
-                        del active_tasks[task_to_process.get("task_id")]
+                    if task_id in active_tasks:
+                        del active_tasks[task_id]
                     
                     state["failed_tasks"] = failed_tasks
                     state["active_tasks"] = active_tasks
                     
                 except Exception as e:
-                    logger.error(f"Agent {agent.config.agent_id} failed to process task: {e}")
+                    logger.error(f"Agent {agent.config.agent_id} failed to process task {task_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    
                     # Mark task as failed
                     failed_tasks = state.get("failed_tasks", {})
-                    failed_tasks[task_to_process.get("task_id")] = {
+                    failed_tasks[task_id] = {
                         **task_to_process,
                         "status": "failed",
                         "error": str(e),
@@ -397,8 +429,8 @@ class SupervisorAgent:
                     }
                     
                     # Remove from active tasks
-                    if task_to_process.get("task_id") in active_tasks:
-                        del active_tasks[task_to_process.get("task_id")]
+                    if task_id in active_tasks:
+                        del active_tasks[task_id]
                     
                     state["failed_tasks"] = failed_tasks
                     state["active_tasks"] = active_tasks
@@ -577,40 +609,44 @@ class SupervisorAgent:
         
         task_description = state["task_description"]
         project_context = state.get("project_context", {})
+        project_name = project_context.get("project_name", "flutter_app")
+        features = project_context.get("requirements", {}).get("features", [])
         
-        # Create simplified decomposition prompt to avoid truncation
+        # Create dynamic decomposition prompt
         prompt = f"""
-        Analyze the following task and decompose it into specific subtasks for Flutter development agents.
+        Analyze the following Flutter app development task and decompose it into specific subtasks for Flutter development agents.
         
         TASK: {task_description}
+        PROJECT NAME: {project_name}
+        FEATURES: {features}
         
         AVAILABLE AGENTS: architecture, implementation, testing, security, devops, documentation, performance
         
-        You MUST respond with ONLY a valid JSON object with maximum 4 tasks to keep response manageable:
+        You MUST respond with ONLY a valid JSON object with exactly 2 tasks (architecture + implementation):
         
         {{
             "tasks": [
                 {{
-                    "task_id": "task_001",
-                    "description": "Design application architecture",
+                    "task_id": "arch_001",
+                    "description": "Design {project_name} architecture with features: {', '.join(features) if features else 'basic functionality'}",
                     "agent_type": "architecture",
                     "priority": "high",
                     "estimated_duration": 30,
                     "dependencies": [],
-                    "deliverables": ["Architecture diagram"]
+                    "deliverables": ["Architecture design", "Project structure", "Dependencies list"]
                 }},
                 {{
-                    "task_id": "task_002", 
-                    "description": "Initialize Flutter project",
+                    "task_id": "impl_001", 
+                    "description": "Create Flutter project {project_name} and implement features: {', '.join(features) if features else 'basic functionality'}",
                     "agent_type": "implementation",
                     "priority": "high",
-                    "estimated_duration": 45,
-                    "dependencies": ["task_001"],
-                    "deliverables": ["Flutter project structure"]
+                    "estimated_duration": 60,
+                    "dependencies": ["arch_001"],
+                    "deliverables": ["Flutter project", "Feature implementation", "UI components"]
                 }}
             ],
-            "workflow_name": "Flutter App Development",
-            "total_estimated_time": 75
+            "workflow_name": "{project_name} Development",
+            "total_estimated_time": 90
         }}
         
         Requirements:
@@ -618,7 +654,7 @@ class SupervisorAgent:
         - agent_type must be one of the available agents
         - priority: "high", "medium", "low"
         - estimated_duration is in minutes
-        - Maximum 4 tasks to keep response size manageable
+        - Exactly 2 tasks: 1 architecture + 1 implementation
         
         Respond with ONLY the JSON object, no explanation or markdown formatting.
         """
@@ -637,14 +673,14 @@ class SupervisorAgent:
             
             if not decomposition.get("tasks"):
                 logger.warning("Task decomposition failed, using fallback")
-                decomposition = self._create_fallback_task_decomposition()
+                decomposition = self._create_dynamic_fallback_task_decomposition(project_name, features)
             
         except asyncio.TimeoutError:
             logger.error("Task decomposition timed out, using fallback")
-            decomposition = self._create_fallback_task_decomposition()
+            decomposition = self._create_dynamic_fallback_task_decomposition(project_name, features)
         except Exception as e:
             logger.error(f"Task decomposition failed: {e}")
-            decomposition = self._create_fallback_task_decomposition()
+            decomposition = self._create_dynamic_fallback_task_decomposition(project_name, features)
         
         # Convert to workflow tasks
         tasks = decomposition.get("tasks", [])
@@ -753,41 +789,113 @@ class SupervisorAgent:
         }
     
     async def _execution_monitor_node(self, state: WorkflowState) -> WorkflowState:
-        """Monitor task execution and handle updates."""
-        logger.info("Execution monitor node: Monitoring task progress")
+        """Monitor task execution and coordinate with real agents."""
+        logger.info("Execution monitor node: Monitoring task progress and coordinating agents")
         
         active_tasks = state.get("active_tasks", {})
         completed_tasks = state.get("completed_tasks", {})
+        pending_tasks = state.get("pending_tasks", [])
         
-        # Simulate task execution and completion
-        newly_completed = {}
-        remaining_active = {}
+        # Move pending tasks to active if dependencies are met
+        newly_active = {}
+        remaining_pending = []
         
-        for task_id, task_info in active_tasks.items():
-            current_status = task_info.get("status", "assigned")
+        for task in pending_tasks:
+            task_id = task.get("task_id")
+            dependencies = task.get("dependencies", [])
             
-            # Simulate task progression: assigned -> in_progress -> completed
-            if current_status == "assigned":
-                # Mark as in progress
-                remaining_active[task_id] = {
-                    **task_info,
-                    "status": "in_progress",
-                    "progress": 0.5,
-                    "updated_at": datetime.utcnow().isoformat()
+            # Check if all dependencies are completed
+            deps_completed = all(dep in completed_tasks for dep in dependencies)
+            
+            if deps_completed:
+                # Move to active tasks and assign to agent
+                agent_type = task.get("agent_type", "implementation")
+                agent_id = f"{agent_type}_agent"
+                
+                newly_active[task_id] = {
+                    **task,
+                    "status": "assigned",
+                    "assigned_agent": agent_id,
+                    "assigned_at": datetime.utcnow().isoformat(),
+                    "progress": 0.0
                 }
-            elif current_status == "in_progress":
-                # Mark as completed and write Flutter project files
-                # Let the implementation complete without injecting hardcoded templates
-                newly_completed[task_id] = {
-                    **task_info,
-                    "status": "completed", 
-                    "progress": 1.0,
-                    "completed_at": datetime.utcnow().isoformat(),
-                    "result": task_info.get("result", {"status": "completed"})
-                }
+                
+                # Update agent assignments
+                agent_assignments = state.get("agent_assignments", {})
+                agent_assignments[task_id] = agent_id
+                state["agent_assignments"] = agent_assignments
             else:
-                # Keep as is
-                remaining_active[task_id] = task_info
+                remaining_pending.append(task)
+        
+        # Update active tasks
+        all_active = {**active_tasks, **newly_active}
+        
+        # Process active tasks by actually invoking real agents
+        updated_active = {}
+        newly_completed = {}
+        
+        for task_id, task_info in all_active.items():
+            current_status = task_info.get("status", "assigned")
+            assigned_agent = task_info.get("assigned_agent")
+            
+            if current_status == "assigned" and assigned_agent:
+                try:
+                    logger.info(f"Processing task {task_id} with agent {assigned_agent}")
+                    
+                    # Create task context
+                    from ..models.task_models import TaskContext
+                    project_context = state.get("project_context", {})
+                    
+                    task_context = TaskContext(
+                        task_id=task_id,
+                        description=task_info.get("description", ""),
+                        task_type=self._map_task_type(task_info.get("agent_type", "implementation")),
+                        metadata={
+                            "project_name": project_context.get("project_name", "flutter_app"),
+                            "features": project_context.get("features", []),
+                            "output_dir": project_context.get("output_dir", "."),
+                            "project_context": project_context,
+                            "correlation_id": f"supervisor_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+                        }
+                    )
+                    
+                    # Invoke the real agent
+                    agent_result = await self._invoke_real_agent(assigned_agent, task_context)
+                    
+                    if agent_result.get("status") == "completed":
+                        newly_completed[task_id] = {
+                            **task_info,
+                            "status": "completed",
+                            "progress": 1.0,
+                            "completed_at": datetime.utcnow().isoformat(),
+                            "result": agent_result.get("result", {}),
+                            "deliverables": agent_result.get("deliverables", {})
+                        }
+                        logger.info(f"Task {task_id} completed successfully")
+                    else:
+                        # Task failed - mark as failed
+                        updated_active[task_id] = {
+                            **task_info,
+                            "status": "failed",
+                            "error": agent_result.get("error", "Unknown error"),
+                            "failed_at": datetime.utcnow().isoformat()
+                        }
+                        logger.error(f"Task {task_id} failed: {agent_result.get('error')}")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing task {task_id}: {e}")
+                    updated_active[task_id] = {
+                        **task_info,
+                        "status": "failed",
+                        "error": str(e),
+                        "failed_at": datetime.utcnow().isoformat()
+                    }
+            elif current_status in ["completed"]:
+                # Move completed tasks
+                newly_completed[task_id] = task_info
+            else:
+                # Keep other tasks in active state
+                updated_active[task_id] = task_info
         
         # Update completed tasks
         all_completed = {**completed_tasks, **newly_completed}
@@ -796,26 +904,47 @@ class SupervisorAgent:
         new_messages = list(state.get("messages", []))
         new_messages.append(create_agent_message(
             self.agent_id,
-            f"Monitoring {len(remaining_active)} active tasks, {len(newly_completed)} newly completed",
+            f"Monitoring: {len(updated_active)} active, {len(newly_completed)} newly completed, {len(remaining_pending)} pending",
             MessageType.STATUS_UPDATE,
             {
-                "active_count": len(remaining_active),
+                "active_count": len(updated_active),
                 "completed_count": len(all_completed),
-                "newly_completed": list(newly_completed.keys())
+                "pending_count": len(remaining_pending),
+                "newly_completed": list(newly_completed.keys()),
+                "newly_active": list(newly_active.keys())
             }
         ))
+        
+        # Determine next action
+        if newly_active:
+            # New tasks became active - continue to agent assignment/execution
+            next_action = "assign"
+        elif updated_active:
+            # Still have active tasks - continue monitoring
+            next_action = "continue"
+        elif remaining_pending:
+            # Have pending tasks but dependencies not met - continue monitoring
+            next_action = "continue"  
+        elif all_completed:
+            # All tasks completed - aggregate results
+            next_action = "aggregate"
+        else:
+            # No tasks - this shouldn't happen, but handle gracefully
+            next_action = "aggregate"
         
         return {
             **state,
             "messages": new_messages,
-            "active_tasks": remaining_active,
+            "active_tasks": updated_active,
             "completed_tasks": all_completed,
-            "next_action": "aggregate" if newly_completed and not remaining_active else "continue",
+            "pending_tasks": remaining_pending,
+            "next_action": next_action,
             "execution_metrics": {
                 **state.get("execution_metrics", {}),
                 "last_monitor_check": datetime.utcnow().isoformat(),
-                "active_task_count": len(remaining_active),
-                "completed_task_count": len(all_completed)
+                "active_task_count": len(updated_active),
+                "completed_task_count": len(all_completed),
+                "pending_task_count": len(remaining_pending)
             }
         }
     
@@ -1157,7 +1286,7 @@ class SupervisorAgent:
             "tasks": [
                 {
                     "task_id": "task_001",
-                    "description": "Design Flutter music streaming application architecture",
+                    "description": "Design Flutter application architecture and project structure",
                     "agent_type": "architecture",
                     "priority": "high",
                     "estimated_duration": 30,
@@ -1166,16 +1295,46 @@ class SupervisorAgent:
                 },
                 {
                     "task_id": "task_002",
-                    "description": "Initialize Flutter project structure and dependencies",
+                    "description": "Create Flutter project and implement core features",
                     "agent_type": "implementation",
                     "priority": "high", 
                     "estimated_duration": 45,
                     "dependencies": ["task_001"],
-                    "deliverables": ["Flutter project", "Basic UI structure"]
+                    "deliverables": ["Flutter project", "Feature implementation", "UI components"]
                 }
             ],
-            "workflow_name": "Music Streaming App Development",
+            "workflow_name": "Flutter App Development",
             "total_estimated_time": 75,
+            "fallback": True
+        }
+
+    def _create_dynamic_fallback_task_decomposition(self, project_name: str, features: list) -> Dict[str, Any]:
+        """Create a dynamic fallback task decomposition based on project details."""
+        features_text = ', '.join(features) if features else 'basic functionality'
+        
+        return {
+            "tasks": [
+                {
+                    "task_id": "arch_001",
+                    "description": f"Design {project_name} architecture with features: {features_text}",
+                    "agent_type": "architecture",
+                    "priority": "high",
+                    "estimated_duration": 30,
+                    "dependencies": [],
+                    "deliverables": ["Architecture design", "Project structure", "Dependencies list"]
+                },
+                {
+                    "task_id": "impl_001",
+                    "description": f"Create Flutter project {project_name} and implement features: {features_text}",
+                    "agent_type": "implementation",
+                    "priority": "high",
+                    "estimated_duration": 60,
+                    "dependencies": ["arch_001"],
+                    "deliverables": ["Flutter project", "Feature implementation", "UI components"]
+                }
+            ],
+            "workflow_name": f"{project_name} Development",
+            "total_estimated_time": 90,
             "fallback": True
         }
     
@@ -1434,6 +1593,93 @@ class SupervisorAgent:
                     "running": True,
                     "error": str(e)
                 }
+            }
+    
+    def _map_task_type(self, agent_type: str) -> TaskType:
+        """Map agent type to task type."""
+        mapping = {
+            "architecture": TaskType.ANALYSIS,
+            "implementation": TaskType.IMPLEMENTATION,
+            "testing": TaskType.TESTING,
+            "security": TaskType.ANALYSIS,
+            "devops": TaskType.DEPLOYMENT,
+            "documentation": TaskType.DOCUMENTATION,
+            "performance": TaskType.ANALYSIS
+        }
+        return mapping.get(agent_type, TaskType.ANALYSIS)
+    
+    async def _invoke_real_agent(self, agent_id: str, task_context: TaskContext) -> Dict[str, Any]:
+        """Invoke the actual agent to process the task."""
+        try:
+            # Import agents dynamically to avoid circular imports
+            from .implementation_agent_new import ImplementationAgent
+            from .architecture_agent import ArchitectureAgent
+            
+            agent = None
+            
+            # Get the agent instance based on agent_id
+            if agent_id == "implementation_agent":
+                # Create agent config
+                from .base_agent import AgentConfig, AgentCapability
+                config = AgentConfig(
+                    agent_id=agent_id,
+                    agent_type="implementation",
+                    capabilities=[AgentCapability.CODE_GENERATION, AgentCapability.FILE_OPERATIONS],
+                    max_concurrent_tasks=3
+                )
+                
+                # Create memory manager
+                from ..core.memory_manager import MemoryManager
+                memory_manager = MemoryManager(agent_id="shared_memory")
+                
+                agent = ImplementationAgent(
+                    config=config,
+                    llm_client=self.flutterswarm_llm,
+                    memory_manager=memory_manager,
+                    event_bus=self.event_bus
+                )
+                
+            elif agent_id == "architecture_agent":
+                from .base_agent import AgentConfig, AgentCapability
+                config = AgentConfig(
+                    agent_id=agent_id,
+                    agent_type="architecture",
+                    capabilities=[AgentCapability.ARCHITECTURE_ANALYSIS, AgentCapability.CODE_GENERATION],
+                    max_concurrent_tasks=3
+                )
+                
+                from ..core.memory_manager import MemoryManager
+                memory_manager = MemoryManager(agent_id="shared_memory")
+                
+                agent = ArchitectureAgent(
+                    config=config,
+                    llm_client=self.flutterswarm_llm,
+                    memory_manager=memory_manager,
+                    event_bus=self.event_bus
+                )
+            
+            if agent:
+                logger.info(f"Invoking {agent_id} for task {task_context.task_id}")
+                task_result = await agent.process_task(task_context)
+                
+                return {
+                    "status": "completed" if task_result.status == "completed" else "failed",
+                    "result": task_result.result,
+                    "deliverables": task_result.deliverables,
+                    "error": task_result.errors[0] if task_result.errors else None
+                }
+            else:
+                logger.warning(f"No agent implementation found for {agent_id}")
+                return {
+                    "status": "failed",
+                    "error": f"Agent {agent_id} not implemented"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error invoking agent {agent_id}: {e}")
+            return {
+                "status": "failed",
+                "error": str(e)
             }
 
 

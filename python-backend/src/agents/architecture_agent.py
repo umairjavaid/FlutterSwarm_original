@@ -14,7 +14,7 @@ from datetime import datetime
 from .base_agent import BaseAgent, AgentCapability, AgentConfig
 from ..core.event_bus import EventBus
 from ..core.memory_manager import MemoryManager
-from ..models.agent_models import AgentMessage, TaskResult, MessageType # Added MessageType
+from ..models.agent_models import AgentMessage, TaskResult, MessageType, TaskStatus # Added MessageType and TaskStatus
 from ..models.task_models import TaskContext, TaskType
 from ..models.project_models import (
     ProjectContext, ArchitecturePattern, PlatformTarget, 
@@ -896,7 +896,7 @@ Respond with detailed JSON structure containing the complete refactoring plan.
             # Safely create TaskContext by filtering supported parameters
             payload = message.payload
             task_context = TaskContext(
-                task_id=payload.get("task_id", f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S%f')}"), # Added %f for microseconds
+                task_id=payload.get("task_id", f"task_{datetime.utcnow().strftime('%Y%m%d_%H%M%S%f')}"),
                 task_type=payload.get("task_type", TaskType.ANALYSIS),
                 description=payload.get("description", ""),
                 parameters=payload.get("parameters", {}),
@@ -1322,39 +1322,199 @@ Respond with detailed JSON structure containing the complete refactoring plan.
             logger.error(f"Error parsing evaluation response: {e}")
             return {"overall_score": 5.0, "error": str(e), "confidence": 0.1}
     
-    async def process_task(self, task_context):
+    async def process_task(self, task_context: TaskContext) -> TaskResult:
+        """Process architecture tasks and provide system design guidance."""
+        logger.info(f"Processing architecture task: {task_context.task_id}")
+        
         try:
-            # Pass both user_prompt and context to execute_llm_task
-            llm_response = await self.execute_llm_task(
-                getattr(task_context, 'description', ''),
-                context=getattr(task_context, 'context', {})
+            # Extract project details from task context
+            metadata = task_context.metadata
+            project_name = metadata.get("project_name", "flutter_app")
+            features = metadata.get("features", [])
+            task_type = task_context.description.lower()
+            
+            logger.info(f"Analyzing architecture for: {task_context.description}")
+            logger.info(f"Project: {project_name}, Features: {features}")
+            
+            # Determine task type and route to appropriate handler
+            if "architecture" in task_type or "design" in task_type:
+                result = await self._handle_architecture_design(task_context, project_name, features)
+            else:
+                # Default to architecture design
+                result = await self._handle_architecture_design(task_context, project_name, features)
+            
+            # Create task result
+            task_result = TaskResult(
+                task_id=task_context.task_id,
+                agent_id=self.agent_id,
+                status=TaskStatus.COMPLETED,
+                result=result,
+                deliverables=result.get("deliverables", {}),
+                metrics=result.get("metrics", {}),
+                metadata=result.get("metadata", {}),
+                errors=result.get("errors", [])
             )
-            # Ensure llm_response is a dict
-            if isinstance(llm_response, str):
-                try:
-                    llm_response = json.loads(llm_response)
-                except Exception as parse_err:
-                    logger.error(f"[ARCHITECTURE:agent] Failed to parse LLM response as JSON: {parse_err}")
-                    return TaskResult(
-                        task_id=getattr(task_context, 'task_id', None),
-                        status="failed",
-                        result={"error": f"Failed to parse LLM response: {parse_err}", "raw_response": llm_response},
-                        agent_id=self.agent_id
-                    )
-            return TaskResult(
-                task_id=getattr(task_context, 'task_id', None),
-                status="completed",
-                result=llm_response,
-                agent_id=self.agent_id
-            )
+            
+            logger.info(f"Successfully completed architecture task: {task_context.task_id}")
+            return task_result
+            
         except Exception as e:
-            logger.error(f"[ARCHITECTURE:agent] LLM or processing error: {e}")
+            logger.error(f"Architecture task failed: {e}")
+            import traceback
+            traceback.print_exc()
+            
             return TaskResult(
-                task_id=getattr(task_context, 'task_id', None),
-                status="failed",
+                task_id=task_context.task_id,
+                agent_id=self.agent_id,
+                status=TaskStatus.FAILED,
                 result={"error": str(e)},
-                agent_id=self.agent_id
+                deliverables={},
+                metrics={},
+                metadata={},
+                errors=[str(e)]
             )
+
+    async def _handle_architecture_design(self, task_context: TaskContext, project_name: str, features: List[str]) -> Dict[str, Any]:
+        """Handle architecture design and planning for Flutter project."""
+        logger.info(f"Designing architecture for {project_name} with features: {features}")
+        
+        try:
+            # Create architecture design prompt
+            arch_prompt = self._create_architecture_prompt(project_name, features)
+            
+            # Generate architecture design using LLM
+            architecture_result = await self.execute_llm_task(
+                user_prompt=arch_prompt,
+                context={
+                    "project_name": project_name,
+                    "features": features,
+                    "patterns": self.flutter_best_practices
+                },
+                structured_output=True
+            )
+            
+            # Store architecture decisions in memory
+            await self.memory_manager.store_memory(
+                content=f"Architecture design for {project_name}: {json.dumps(architecture_result)}",
+                metadata={
+                    "type": "architecture_design",
+                    "project_name": project_name,
+                    "features": features
+                },
+                correlation_id=task_context.metadata.get("correlation_id", "unknown"),
+                importance=0.9,
+                long_term=True
+            )
+            
+            return {
+                "status": "completed",
+                "architecture_design": architecture_result,
+                "deliverables": {
+                    "architecture_diagram": "Project architecture and component relationships",
+                    "technical_specifications": "Detailed technical specifications and patterns",
+                    "dependency_list": "Required Flutter packages and dependencies"
+                },
+                "metadata": {
+                    "recommended_patterns": architecture_result.get("recommended_patterns", []),
+                    "dependencies": architecture_result.get("dependencies", []),
+                    "project_structure": architecture_result.get("project_structure", {})
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Architecture design failed: {e}")
+            raise
+
+    def _create_architecture_prompt(self, project_name: str, features: List[str]) -> str:
+        """Create a comprehensive prompt for architecture design."""
+        features_text = ", ".join(features) if features else "basic mobile app functionality"
+        
+        return f"""
+You are an expert Flutter architect. Design a comprehensive, scalable architecture for "{project_name}" with the following features: {features_text}.
+
+ARCHITECTURE REQUIREMENTS:
+1. Design a clean, maintainable, and scalable Flutter app architecture
+2. Recommend appropriate architectural patterns (Clean Architecture, BLoC, etc.)
+3. Design proper folder structure and code organization
+4. Select suitable state management solution
+5. Plan navigation architecture and routing
+6. Recommend necessary Flutter packages and dependencies
+7. Consider platform-specific requirements (iOS, Android, Web)
+8. Plan for testing, error handling, and performance optimization
+
+FEATURES TO ANALYZE:
+{self._generate_architecture_analysis(features)}
+
+OUTPUT FORMAT:
+Return a JSON object with the following structure:
+{{
+    "recommended_patterns": {{
+        "architecture": "clean_architecture|bloc|mvc|mvvm",
+        "state_management": "bloc|provider|riverpod|getx",
+        "navigation": "go_router|auto_route|navigator",
+        "dependency_injection": "get_it|provider|injectable"
+    }},
+    "project_structure": {{
+        "lib/": {{
+            "core/": "Core utilities, constants, and base classes",
+            "features/": "Feature-based modules with their own data, domain, and presentation layers",
+            "shared/": "Shared widgets, services, and utilities",
+            "main.dart": "App entry point and configuration"
+        }}
+    }},
+    "dependencies": [
+        "flutter_bloc",
+        "go_router", 
+        "dio",
+        "hive",
+        "get_it"
+    ],
+    "dev_dependencies": [
+        "flutter_test",
+        "mockito",
+        "bloc_test"
+    ],
+    "technical_specifications": {{
+        "state_management": "Detailed state management approach",
+        "navigation": "Navigation and routing strategy", 
+        "data_layer": "Data persistence and API integration strategy",
+        "testing_strategy": "Unit, widget, and integration testing approach"
+    }},
+    "implementation_guidelines": [
+        "Follow Clean Architecture principles",
+        "Implement proper error handling",
+        "Use dependency injection for testability",
+        "Follow Flutter best practices and conventions"
+    ]
+}}
+
+Provide a comprehensive, production-ready architecture design that supports all requested features.
+"""
+
+    def _generate_architecture_analysis(self, features: List[str]) -> str:
+        """Generate detailed architecture analysis for each feature."""
+        if not features:
+            return "- Basic mobile app: Simple navigation, basic UI components, minimal state management"
+        
+        feature_analysis = []
+        
+        for feature in features:
+            if "photo" in feature.lower() or "image" in feature.lower():
+                feature_analysis.append("- Photo sharing: Image processing, file upload, local caching, gallery management")
+            elif "auth" in feature.lower() or "login" in feature.lower():
+                feature_analysis.append("- Authentication: Secure token management, user session handling, form validation")
+            elif "social" in feature.lower() or "chat" in feature.lower() or "messag" in feature.lower():
+                feature_analysis.append("- Social features: Real-time communication, user management, notification system")
+            elif "music" in feature.lower() or "audio" in feature.lower():
+                feature_analysis.append("- Music player: Audio streaming, playlist management, background playback")
+            elif "ecommerce" in feature.lower() or "shop" in feature.lower():
+                feature_analysis.append("- E-commerce: Product catalog, shopping cart state, payment integration")
+            elif "weather" in feature.lower():
+                feature_analysis.append("- Weather app: Location services, API integration, data caching")
+            else:
+                feature_analysis.append(f"- {feature}: Comprehensive analysis and planning for {feature}")
+        
+        return "\n".join(feature_analysis)
 
     async def process_llm_response(self, response_text):
         """Process the LLM response with improved JSON handling."""
