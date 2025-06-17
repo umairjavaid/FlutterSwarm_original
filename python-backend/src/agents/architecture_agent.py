@@ -16,6 +16,7 @@ from ..core.event_bus import EventBus
 from ..core.memory_manager import MemoryManager
 from ..models.agent_models import AgentMessage, TaskResult, MessageType, TaskStatus # Added MessageType and TaskStatus
 from ..models.task_models import TaskContext, TaskType
+from ..utils.json_utils import extract_json_from_llm_response
 from ..models.project_models import (
     ProjectContext, ArchitecturePattern, PlatformTarget, 
     ProjectType, CodeMetrics
@@ -1203,11 +1204,12 @@ Respond with detailed JSON structure containing the complete refactoring plan.
     async def _parse_analysis_response(self, response: str) -> Dict[str, Any]:
         """Parse LLM analysis response into structured format with better error handling."""
         try:
-            # Try to parse as JSON first
-            if response.strip().startswith('{'):
-                return json.loads(response)
+            # Use robust JSON extraction
+            parsed_json = extract_json_from_llm_response(response)
+            if parsed_json:
+                return parsed_json
             
-            # If not JSON, use LLM to convert to structured format
+            # If extraction failed, use LLM to convert to structured format
             structure_prompt = f"""
             Convert this architecture analysis into structured JSON format:
             
@@ -1224,6 +1226,8 @@ Respond with detailed JSON structure containing the complete refactoring plan.
                 "best_practices_compliance": 0.85,
                 "confidence": 0.9
             }}
+            
+            Respond with ONLY the JSON object, no additional text.
             """
             
             try:
@@ -1237,7 +1241,13 @@ Respond with detailed JSON structure containing the complete refactoring plan.
                     timeout=60  # 1 minute timeout
                 )
                 
-                return json.loads(structured_response)
+                parsed_structured = extract_json_from_llm_response(structured_response)
+                if parsed_structured:
+                    return parsed_structured
+                else:
+                    logger.error("Failed to extract JSON from structured response")
+                    return self._create_fallback_analysis_response()
+                    
             except asyncio.TimeoutError:
                 logger.error("Architecture analysis structuring timed out")
                 return self._create_fallback_analysis_response()
@@ -1262,8 +1272,10 @@ Respond with detailed JSON structure containing the complete refactoring plan.
     async def _parse_structure_response(self, response: str) -> Dict[str, Any]:
         """Parse structure recommendation response."""
         try:
-            if response.strip().startswith('{'):
-                return json.loads(response)
+            # Use robust JSON extraction
+            parsed_json = extract_json_from_llm_response(response)
+            if parsed_json:
+                return parsed_json
             
             # Use LLM to structure the response
             structure_prompt = f"""
@@ -1281,10 +1293,17 @@ Respond with detailed JSON structure containing the complete refactoring plan.
                 "rationale": "",
                 "confidence": 0.9
             }}
+            
+            Respond with ONLY the JSON object, no additional text.
             """
             
             structured = await self.llm_client.generate_response(structure_prompt, temperature=0.1)
-            return json.loads(structured)
+            parsed_structured = extract_json_from_llm_response(structured)
+            if parsed_structured:
+                return parsed_structured
+            else:
+                logger.error("Failed to extract JSON from structured structure response")
+                return {"error": "Structure parsing failed", "confidence": 0.1}
             
         except Exception as e:
             logger.error(f"Error parsing structure response: {e}")
@@ -1293,8 +1312,10 @@ Respond with detailed JSON structure containing the complete refactoring plan.
     async def _parse_evaluation_response(self, response: str) -> Dict[str, Any]:
         """Parse design evaluation response."""
         try:
-            if response.strip().startswith('{'):
-                return json.loads(response)
+            # Use robust JSON extraction
+            parsed_json = extract_json_from_llm_response(response)
+            if parsed_json:
+                return parsed_json
             
             # Structure the evaluation response
             structure_prompt = f"""
@@ -1313,10 +1334,17 @@ Respond with detailed JSON structure containing the complete refactoring plan.
                 "refactoring_priorities": [],
                 "confidence": 0.85
             }}
+            
+            Respond with ONLY the JSON object, no additional text.
             """
             
             structured = await self.llm_client.generate_response(structure_prompt, temperature=0.1)
-            return json.loads(structured)
+            parsed_structured = extract_json_from_llm_response(structured)
+            if parsed_structured:
+                return parsed_structured
+            else:
+                logger.error("Failed to extract JSON from structured evaluation response")
+                return {"error": "Evaluation parsing failed", "confidence": 0.1}
             
         except Exception as e:
             logger.error(f"Error parsing evaluation response: {e}")
@@ -1390,21 +1418,43 @@ Respond with detailed JSON structure containing the complete refactoring plan.
                     "features": features,
                     "patterns": self.flutter_best_practices
                 },
-                structured_output=True
+                structured_output=False  # Change to False to get raw response
             )
             
-            # Store architecture decisions in memory
-            await self.memory_manager.store_memory(
-                content=f"Architecture design for {project_name}: {json.dumps(architecture_result)}",
-                metadata={
-                    "type": "architecture_design",
-                    "project_name": project_name,
-                    "features": features
-                },
-                correlation_id=task_context.metadata.get("correlation_id", "unknown"),
-                importance=0.9,
-                long_term=True
-            )
+            # Extract JSON from the response
+            if architecture_result.get("status") == "success":
+                raw_response = architecture_result.get("response", "")
+                # Use the enhanced JSON extraction function
+                from src.utils.json_utils import extract_json_from_llm_response
+                parsed_json = extract_json_from_llm_response(raw_response)
+                
+                if parsed_json:
+                    architecture_result = parsed_json
+                else:
+                    logger.error("Failed to extract JSON from architecture LLM response")
+                    architecture_result = {
+                        "error": "JSON extraction failed",
+                        "raw_response": raw_response[:500]  # Truncated for logging
+                    }
+            elif architecture_result.get("error"):
+                logger.error(f"Architecture LLM task failed: {architecture_result.get('error')}")
+            
+            # Store architecture decisions in memory only if successful
+            if isinstance(architecture_result, dict) and "error" not in architecture_result:
+                try:
+                    await self.memory_manager.store_memory(
+                        content=f"Architecture design for {project_name}: {json.dumps(architecture_result)}",
+                        metadata={
+                            "type": "architecture_design",
+                            "project_name": project_name,
+                            "features": features
+                        },
+                        importance=0.9,
+                        long_term=True
+                    )
+                except Exception as memory_error:
+                    logger.error(f"Failed to store architecture in memory: {memory_error}")
+                    # Continue execution even if memory storage fails
             
             return {
                 "status": "completed",

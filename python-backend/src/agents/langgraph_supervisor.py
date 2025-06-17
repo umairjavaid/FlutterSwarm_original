@@ -21,6 +21,7 @@ from langgraph.prebuilt import ToolNode
 from ..models.langgraph_models import WorkflowState, AgentRole, WorkflowPhase, MessageType
 from ..models.langgraph_models import create_agent_message, create_system_message
 from ..models.task_models import TaskContext, TaskType
+from ..models.agent_models import TaskStatus
 from ..core.langgraph_checkpointer import create_checkpointer
 from ..config import get_logger, settings
 from .base_agent import AgentConfig, AgentCapability
@@ -1663,7 +1664,7 @@ class SupervisorAgent:
                 task_result = await agent.process_task(task_context)
                 
                 return {
-                    "status": "completed" if task_result.status == "completed" else "failed",
+                    "status": "completed" if task_result.status == TaskStatus.COMPLETED else "failed",
                     "result": task_result.result,
                     "deliverables": task_result.deliverables,
                     "error": task_result.errors[0] if task_result.errors else None

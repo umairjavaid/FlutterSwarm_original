@@ -81,21 +81,43 @@ class FlutterSwarmCLI:
         
         # Extract features dynamically
         feature_keywords = {
-            "authentication": ["login", "auth", "signin", "signup", "user"],
-            "navigation": ["navigation", "routing", "drawer", "tabs", "menu"],
-            "data_management": ["database", "storage", "api", "network", "crud"],
-            "ui_components": ["form", "list", "grid", "card", "chart"],
-            "media": ["camera", "photo", "video", "gallery", "image"],
-            "location": ["maps", "location", "gps", "geolocation"],
-            "notifications": ["notification", "push", "alert", "message"],
-            "payments": ["payment", "purchase", "billing", "subscription"],
-            "social": ["share", "social", "chat", "messaging"],
-            "offline": ["offline", "sync", "cache", "local"]
+            "music_streaming": ["music", "streaming", "audio", "playlist", "player"],
+            "video_streaming": ["video", "streaming", "tiktok", "short videos"],
+            "e_commerce": ["ecommerce", "e-commerce", "shopping", "store", "cart", "purchase"],
+            "social_media": ["social", "media", "chat", "messaging", "friends", "follow"],
+            "authentication": ["login", "auth", "signin", "signup", "user", "account"],
+            "navigation": ["navigation", "routing", "drawer", "tabs", "menu", "bottom nav"],
+            "data_management": ["database", "storage", "api", "network", "crud", "persistence"],
+            "ui_components": ["form", "list", "grid", "card", "chart", "widgets"],
+            "media_handling": ["camera", "photo", "video", "gallery", "image", "capture"],
+            "location_services": ["maps", "location", "gps", "geolocation", "coordinates"],
+            "notifications": ["notification", "push", "alert", "message", "fcm"],
+            "payments": ["payment", "purchase", "billing", "subscription", "stripe"],
+            "offline_support": ["offline", "sync", "cache", "local", "connectivity"],
+            "search_functionality": ["search", "filter", "query", "find"],
+            "user_profiles": ["profile", "user profile", "avatar", "bio"],
+            "settings": ["settings", "preferences", "configuration", "options"],
+            "dark_mode": ["dark mode", "theme", "light", "dark"],
+            "real_time": ["real time", "live", "instant", "websocket"]
         }
         
+        detected_features = []
         for feature, keywords in feature_keywords.items():
             if any(keyword in description_lower for keyword in keywords):
-                requirements["features"].append(feature)
+                detected_features.append(feature)
+        
+        # If we detected specific app types, add comprehensive features
+        if any(f in detected_features for f in ["music_streaming"]):
+            detected_features.extend(["audio_player", "playlist_management", "media_controls", "search_functionality"])
+        elif any(f in detected_features for f in ["video_streaming"]):
+            detected_features.extend(["video_player", "user_profiles", "social_media", "search_functionality"])
+        elif any(f in detected_features for f in ["e_commerce"]):
+            detected_features.extend(["product_catalog", "shopping_cart", "authentication", "payments"])
+        elif any(f in detected_features for f in ["social_media"]):
+            detected_features.extend(["user_profiles", "messaging", "notifications", "media_handling"])
+        
+        # Remove duplicates and ensure we have at least basic features
+        requirements["features"] = list(set(detected_features)) or ["navigation", "ui_components", "responsive_design"]
         
         # Determine complexity
         complexity_indicators = {

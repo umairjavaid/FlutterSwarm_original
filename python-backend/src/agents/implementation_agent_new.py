@@ -6,6 +6,7 @@ and implementation of Flutter applications based on specifications.
 """
 
 import json
+import os
 import uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime
@@ -661,13 +662,42 @@ Provide complete, production-ready Flutter UI code with proper documentation.
             logger.info(f"Project: {project_name} (normalized: {normalized_project_name}), Features: {features}")
             
             # Determine task type and route to appropriate handler
-            if "project_setup" in task_type or "create flutter project" in task_type:
+            if "project_setup" in task_type and "implement features" not in task_type:
+                # Only project setup
                 result = await self._handle_project_setup(task_context, normalized_project_name, output_dir)
-            elif "feature_implementation" in task_type or "implement features" in task_type:
+            elif "feature_implementation" in task_type and "create flutter project" not in task_type:
+                # Only feature implementation
                 result = await self._handle_feature_implementation(task_context, normalized_project_name, features, output_dir)
             else:
-                # Default to feature implementation
-                result = await self._handle_feature_implementation(task_context, normalized_project_name, features, output_dir)
+                # Default: Create project AND implement features (most common case)
+                logger.info(f"Creating project and implementing features for: {normalized_project_name}")
+                
+                # Step 1: Create the Flutter project
+                project_result = await self._handle_project_setup(task_context, normalized_project_name, output_dir)
+                
+                # Step 2: Implement features if any are specified
+                if features:
+                    logger.info(f"Implementing features: {features}")
+                    feature_result = await self._handle_feature_implementation(task_context, normalized_project_name, features, output_dir)
+                    
+                    # Combine results
+                    result = {
+                        "status": "completed",
+                        "project_creation": project_result,
+                        "feature_implementation": feature_result,
+                        "deliverables": {
+                            **project_result.get("deliverables", {}),
+                            **feature_result.get("deliverables", {})
+                        },
+                        "metadata": {
+                            **project_result.get("metadata", {}),
+                            **feature_result.get("metadata", {}),
+                            "features_implemented": features
+                        }
+                    }
+                else:
+                    # Just project creation
+                    result = project_result
             
             # Create task result
             task_result = TaskResult(
@@ -730,12 +760,32 @@ Provide complete, production-ready Flutter UI code with proper documentation.
                     "project_name": project_name,
                     "description": f"Flutter app: {project_name}",
                     "platforms": ["android", "ios", "web"],
-                    "project_dir": output_dir
+                    "project_dir": output_dir,
+                    "overwrite": True  # Allow overwriting existing projects
                 }
             )
             
             if create_result.status != ToolStatus.SUCCESS:
-                raise ValueError(f"Failed to create Flutter project: {create_result.error_message}")
+                # If creation failed due to existing project, try to proceed with existing one
+                project_path = f"{output_dir}/{project_name}"
+                if "already exists" in str(create_result.error_message) and os.path.exists(project_path):
+                    logger.info(f"Using existing Flutter project at: {project_path}")
+                    return {
+                        "status": "completed",
+                        "project_path": project_path,
+                        "deliverables": {
+                            "project_structure": project_path,
+                            "pubspec_yaml": f"{project_path}/pubspec.yaml",
+                            "main_dart": f"{project_path}/lib/main.dart"
+                        },
+                        "metadata": {
+                            "project_name": project_name,
+                            "platforms": ["android", "ios", "web"],
+                            "note": "Used existing project"
+                        }
+                    }
+                else:
+                    raise ValueError(f"Failed to create Flutter project: {create_result.error_message}")
             
             project_path = create_result.data.get("project_path")
             logger.info(f"Flutter project created at: {project_path}")
@@ -777,9 +827,12 @@ Provide complete, production-ready Flutter UI code with proper documentation.
                 structured_output=True
             )
             
+            # Handle both successful JSON and error responses
+            processed_result = await self._process_implementation_response(implementation_result)
+            
             # Write generated code to files
             project_path = f"{output_dir}/{project_name}"
-            generated_files = await self._write_feature_code(project_path, implementation_result)
+            generated_files = await self._write_feature_code(project_path, processed_result)
             
             return {
                 "status": "completed",
@@ -869,6 +922,9 @@ Generate complete, production-ready code that implements real functionality for 
         generated_files = []
         
         try:
+            # Ensure project directories exist
+            await self._ensure_project_directories(project_path)
+            
             # Use file system tool to write files
             file_tool = None
             for tool_name, tool_instance in self.available_tools.items():
@@ -877,49 +933,382 @@ Generate complete, production-ready code that implements real functionality for 
                     break
             
             if not file_tool:
-                logger.warning("File system tool not available, skipping file writing")
-                return []
+                logger.warning("File system tool not available, using fallback file writing")
+                return await self._write_files_fallback(project_path, implementation_result)
             
             # Write main.dart
-            if "main_dart" in implementation_result:
+            main_dart_content = implementation_result.get("main_dart")
+            if main_dart_content:
                 main_path = f"{project_path}/lib/main.dart"
-                await file_tool.execute_operation(
+                result = await file_tool.execute(
                     operation="write_file",
                     params={
-                        "file_path": main_path,
-                        "content": implementation_result["main_dart"]
+                        "path": main_path,
+                        "content": main_dart_content
                     }
                 )
-                generated_files.append(main_path)
+                if result.status == ToolStatus.SUCCESS:
+                    generated_files.append(main_path)
+                    logger.info(f"Written main.dart to {main_path}")
             
             # Write pubspec.yaml
-            if "pubspec_yaml" in implementation_result:
+            pubspec_content = implementation_result.get("pubspec_yaml")
+            if pubspec_content:
                 pubspec_path = f"{project_path}/pubspec.yaml"
-                await file_tool.execute_operation(
+                result = await file_tool.execute(
                     operation="write_file",
                     params={
-                        "file_path": pubspec_path,
-                        "content": implementation_result["pubspec_yaml"]
+                        "path": pubspec_path,
+                        "content": pubspec_content
                     }
                 )
-                generated_files.append(pubspec_path)
+                if result.status == ToolStatus.SUCCESS:
+                    generated_files.append(pubspec_path)
+                    logger.info(f"Written pubspec.yaml to {pubspec_path}")
             
             # Write additional files
             files = implementation_result.get("files", {})
             for file_path, content in files.items():
-                full_path = f"{project_path}/{file_path}"
-                await file_tool.execute_operation(
-                    operation="write_file",
-                    params={
-                        "file_path": full_path,
-                        "content": content
-                    }
-                )
-                generated_files.append(full_path)
+                if content and content.strip():  # Only write non-empty files
+                    full_path = f"{project_path}/{file_path}"
+                    result = await file_tool.execute(
+                        operation="write_file",
+                        params={
+                            "path": full_path,
+                            "content": content
+                        }
+                    )
+                    if result.status == ToolStatus.SUCCESS:
+                        generated_files.append(full_path)
+                        logger.info(f"Written {file_path} to {full_path}")
             
             logger.info(f"Generated {len(generated_files)} files for Flutter project")
             return generated_files
             
         except Exception as e:
             logger.error(f"Failed to write feature code: {e}")
+            # Try fallback method
+            return await self._write_files_fallback(project_path, implementation_result)
+
+    async def _ensure_project_directories(self, project_path: str) -> None:
+        """Ensure all necessary project directories exist."""
+        import os
+        
+        directories = [
+            f"{project_path}/lib",
+            f"{project_path}/lib/widgets",
+            f"{project_path}/lib/screens",
+            f"{project_path}/lib/models",
+            f"{project_path}/lib/services",
+            f"{project_path}/lib/state",
+            f"{project_path}/test",
+            f"{project_path}/android",
+            f"{project_path}/ios"
+        ]
+        
+        for directory in directories:
+            os.makedirs(directory, exist_ok=True)
+
+    async def _write_files_fallback(self, project_path: str, implementation_result: Dict[str, Any]) -> List[str]:
+        """Fallback method to write files directly using Python file operations."""
+        import os
+        generated_files = []
+        
+        try:
+            # Ensure project directories exist
+            await self._ensure_project_directories(project_path)
+            
+            # Write main.dart
+            main_dart_content = implementation_result.get("main_dart")
+            if main_dart_content:
+                main_path = f"{project_path}/lib/main.dart"
+                with open(main_path, 'w', encoding='utf-8') as f:
+                    f.write(main_dart_content)
+                generated_files.append(main_path)
+                logger.info(f"Written main.dart to {main_path} (fallback)")
+            
+            # Write pubspec.yaml
+            pubspec_content = implementation_result.get("pubspec_yaml")
+            if pubspec_content:
+                pubspec_path = f"{project_path}/pubspec.yaml"
+                with open(pubspec_path, 'w', encoding='utf-8') as f:
+                    f.write(pubspec_content)
+                generated_files.append(pubspec_path)
+                logger.info(f"Written pubspec.yaml to {pubspec_path} (fallback)")
+            
+            # Write additional files
+            files = implementation_result.get("files", {})
+            for file_path, content in files.items():
+                if content and content.strip():  # Only write non-empty files
+                    full_path = f"{project_path}/{file_path}"
+                    
+                    # Ensure directory exists
+                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                    
+                    with open(full_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    generated_files.append(full_path)
+                    logger.info(f"Written {file_path} to {full_path} (fallback)")
+            
+            logger.info(f"Generated {len(generated_files)} files using fallback method")
+            return generated_files
+            
+        except Exception as e:
+            logger.error(f"Fallback file writing also failed: {e}")
             return []
+
+    async def _process_implementation_response(self, implementation_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Process LLM implementation response, handling both JSON and raw text responses."""
+        logger.info("Processing implementation response...")
+        
+        # Check if the response has an error (JSON parsing failed)
+        if implementation_result.get("error") == "JSONDecodeError":
+            logger.warning("LLM response JSON parsing failed, extracting code from raw response")
+            raw_response = implementation_result.get("response", "")
+            
+            # Use robust JSON extraction
+            from ..utils.json_utils import extract_json_from_llm_response
+            extracted_json = extract_json_from_llm_response(raw_response)
+            
+            if extracted_json:
+                logger.info("Successfully extracted JSON from raw response")
+                return extracted_json
+            else:
+                # Fallback: extract code blocks manually
+                logger.info("JSON extraction failed, using fallback code extraction")
+                return self._extract_code_blocks_from_text(raw_response)
+        
+        # Check if we got a successful JSON response
+        elif implementation_result.get("status") == "success" and isinstance(implementation_result.get("response"), dict):
+            return implementation_result["response"]
+        
+        # Handle other successful cases
+        elif "main_dart" in implementation_result or "files" in implementation_result:
+            return implementation_result
+        
+        # Default fallback
+        else:
+            logger.warning("Unexpected implementation result format, using fallback")
+            return self._create_fallback_implementation()
+
+    def _extract_code_blocks_from_text(self, text: str) -> Dict[str, Any]:
+        """Extract Dart code blocks and file information from raw text response."""
+        import re
+        import json
+        
+        result = {
+            "files": {},
+            "main_dart": "",
+            "pubspec_yaml": "",
+            "dependencies": []
+        }
+        
+        # Strategy 1: Look for JSON structure in the text
+        json_match = re.search(r'\{[\s\S]*?"files"[\s\S]*?\}', text)
+        if json_match:
+            try:
+                json_str = json_match.group(0)
+                # Try to clean up incomplete JSON
+                if not json_str.endswith('}'):
+                    # Find the last complete key-value pair
+                    last_comma = json_str.rfind(',')
+                    if last_comma > 0:
+                        json_str = json_str[:last_comma] + '}'
+                
+                parsed_json = json.loads(json_str)
+                if isinstance(parsed_json, dict):
+                    logger.info("Successfully extracted JSON structure from text")
+                    return parsed_json
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse extracted JSON: {e}")
+        
+        # Strategy 2: Extract code blocks with file names
+        code_block_pattern = r'```(?:dart|yaml)?\s*(?:\n?(?:// )?(?:File: )?([\w/_.]+))?\n(.*?)```'
+        matches = re.findall(code_block_pattern, text, re.DOTALL)
+        
+        for file_path, code_content in matches:
+            code_content = code_content.strip()
+            
+            if not file_path:
+                # Try to determine file type from content
+                if "main(" in code_content or "runApp(" in code_content:
+                    file_path = "lib/main.dart"
+                elif "name:" in code_content and "dependencies:" in code_content:
+                    file_path = "pubspec.yaml"
+                elif "class " in code_content and "Widget" in code_content:
+                    # Extract class name for widget files
+                    class_match = re.search(r'class\s+(\w+)', code_content)
+                    if class_match:
+                        class_name = class_match.group(1)
+                        file_path = f"lib/widgets/{class_name.lower()}.dart"
+                    else:
+                        file_path = f"lib/unknown_{len(result['files'])}.dart"
+                else:
+                    file_path = f"lib/unknown_{len(result['files'])}.dart"
+            
+            # Clean up file path
+            file_path = file_path.strip("/ ")
+            
+            if file_path.endswith("main.dart"):
+                result["main_dart"] = code_content
+                result["files"]["lib/main.dart"] = code_content
+            elif file_path.endswith("pubspec.yaml"):
+                result["pubspec_yaml"] = code_content
+                result["files"]["pubspec.yaml"] = code_content
+            else:
+                result["files"][file_path] = code_content
+        
+        # Strategy 3: If no code blocks found, look for structured content
+        if not result["files"]:
+            # Look for main.dart content
+            main_patterns = [
+                r'(?:main\.dart[:\s]*)(.*?)(?=\n\s*(?:pubspec\.yaml|lib/|$))',
+                r'(?:import\s+[\'"]flutter/material\.dart[\'"];.*?)(?=\n\s*(?:pubspec\.yaml|lib/|$))',
+            ]
+            
+            for pattern in main_patterns:
+                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+                if match:
+                    main_content = match.group(1 if '(' in pattern else 0).strip()
+                    if len(main_content) > 100:  # Reasonable size check
+                        result["main_dart"] = main_content
+                        result["files"]["lib/main.dart"] = main_content
+                        break
+            
+            # Look for pubspec.yaml content
+            pubspec_patterns = [
+                r'(?:pubspec\.yaml[:\s]*)(.*?)(?=\n\s*(?:lib/|dependencies:|$))',
+                r'(name:\s*\w+.*?(?=\n\s*(?:lib/|$)))',
+            ]
+            
+            for pattern in pubspec_patterns:
+                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+                if match:
+                    pubspec_content = match.group(1).strip()
+                    if "dependencies:" in pubspec_content and len(pubspec_content) > 50:
+                        result["pubspec_yaml"] = pubspec_content
+                        result["files"]["pubspec.yaml"] = pubspec_content
+                        break
+        
+        # Strategy 4: If still no content, create a basic structure from any Dart-like content
+        if not result["files"]:
+            dart_content_pattern = r'(class\s+\w+.*?{[\s\S]*?}|void\s+main\s*\(.*?{[\s\S]*?}|import\s+[\'"][^\'"]*[\'"];)'
+            dart_matches = re.findall(dart_content_pattern, text, re.MULTILINE)
+            
+            if dart_matches:
+                # Combine all Dart content
+                combined_content = "\n".join(dart_matches)
+                if len(combined_content) > 50:
+                    result["main_dart"] = combined_content
+                    result["files"]["lib/main.dart"] = combined_content
+        
+        logger.info(f"Extracted {len(result['files'])} files from text response")
+        return result
+
+    def _create_fallback_implementation(self) -> Dict[str, Any]:
+        """Create a basic fallback implementation when parsing fails completely."""
+        basic_main_dart = '''
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Flutter Demo',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
+      ),
+      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+    );
+  }
+}
+
+class MyHomePage extends StatefulWidget {
+  const MyHomePage({super.key, required this.title});
+
+  final String title;
+
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  int _counter = 0;
+
+  void _incrementCounter() {
+    setState(() {
+      _counter++;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: Text(widget.title),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            const Text(
+              'You have pushed the button this many times:',
+            ),
+            Text(
+              '$_counter',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _incrementCounter,
+        tooltip: 'Increment',
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+'''.strip()
+        
+        basic_pubspec = '''
+name: flutter_app
+description: A new Flutter project.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
+'''.strip()
+        
+        return {
+            "main_dart": basic_main_dart,
+            "pubspec_yaml": basic_pubspec,
+            "files": {
+                "lib/main.dart": basic_main_dart,
+                "pubspec.yaml": basic_pubspec
+            },
+            "dependencies": ["flutter", "cupertino_icons"],
+            "notes": ["Fallback implementation used due to parsing errors"]
+        }

@@ -52,10 +52,9 @@ class MemoryManager:
         entry_id = f"{self.agent_id}_{datetime.utcnow().timestamp()}"
         
         entry = MemoryEntry(
-            id=entry_id,
+            entry_id=entry_id,
             content=content,
             metadata=metadata or {},
-            correlation_id=correlation_id,
             importance=importance,
             agent_id=self.agent_id
         )
