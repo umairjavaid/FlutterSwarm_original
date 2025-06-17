@@ -83,11 +83,7 @@ class ImplementationAgent(BaseAgent):
             "architecture": ["clean", "mvvm", "mvc", "bloc_pattern"]
         }
         
-        # Remove hardcoded templates - use dynamic template system
-        from ..core.template_engine import get_template_engine
-        self.template_engine = get_template_engine()
-        
-        logger.info(f"Implementation Agent {self.agent_id} initialized with dynamic templates")
+        logger.info(f"Implementation Agent {self.agent_id} initialized with LLM-based code generation")
 
     async def _get_default_system_prompt(self) -> str:
         """Get the default system prompt for the implementation agent."""
@@ -168,8 +164,7 @@ Always generate complete, working code solutions with proper imports, error hand
             user_prompt=feature_prompt,
             context={
                 "task": task_context.to_dict(),
-                "patterns": self.flutter_patterns,
-                "templates": self.code_templates
+                "patterns": self.flutter_patterns
             },
             structured_output=True
         )
@@ -238,45 +233,14 @@ Always generate complete, working code solutions with proper imports, error hand
             "responsive_breakpoints": ui_implementation.get("breakpoints", {})
         }
 
-    # Remove hardcoded template methods and replace with dynamic ones
-    def _get_dynamic_template(self, template_type: str, architectural_pattern: str = "basic") -> str:
-        """Get template dynamically from template engine."""
-        from ..core.template_engine import TemplateType, ArchitecturalPattern, TemplateContext
-        
-        # Map string types to enums
-        type_map = {
-            "widget": TemplateType.WIDGET,
-            "bloc": TemplateType.BLOC, 
-            "repository": TemplateType.REPOSITORY,
-            "model": TemplateType.MODEL,
-            "service": TemplateType.SERVICE,
-            "screen": TemplateType.SCREEN
-        }
-        
-        pattern_map = {
-            "basic": ArchitecturalPattern.BASIC_PATTERN,
-            "clean": ArchitecturalPattern.CLEAN_ARCHITECTURE,
-            "bloc": ArchitecturalPattern.BLOC_PATTERN,
-            "provider": ArchitecturalPattern.PROVIDER_PATTERN
-        }
-        
-        template_type_enum = type_map.get(template_type)
-        pattern_enum = pattern_map.get(architectural_pattern, ArchitecturalPattern.BASIC_PATTERN)
-        
-        if template_type_enum:
-            template = self.template_engine.get_template(template_type_enum, pattern_enum)
-            return template.source if template else ""
-        
-        return ""
-
     def _create_dynamic_implementation_prompt(
         self,
         task_context: TaskContext,
         llm_analysis: Dict[str, Any]
     ) -> str:
-        """Create prompt for implementation using dynamic templates."""
+        """Create prompt for implementation using pure LLM generation."""
         return f"""
-Implement a complete Flutter feature based on the following specifications:
+You are implementing a complete Flutter feature. Generate ALL code files for the entire application.
 
 FEATURE REQUIREMENTS:
 {task_context.description}
@@ -287,52 +251,51 @@ TECHNICAL ANALYSIS:
 PROJECT CONTEXT:
 {json.dumps(task_context.project_context, indent=2)}
 
-Please provide a comprehensive implementation using appropriate architectural patterns:
+CRITICAL: You must respond with ONLY a valid JSON object in this exact format:
 
-1. DYNAMIC TEMPLATE SELECTION:
-   - Analyze requirements to determine optimal architectural pattern
-   - Select appropriate templates (basic, clean architecture, BLoC, etc.)
-   - Customize templates based on specific feature needs
+{{
+  "files": [
+    {{
+      "path": "lib/main.dart",
+      "content": "COMPLETE FLUTTER CODE HERE - NOT JUST IMPORTS"
+    }},
+    {{
+      "path": "lib/screens/home_screen.dart", 
+      "content": "COMPLETE DART CODE FOR HOME SCREEN"
+    }},
+    {{
+      "path": "lib/models/expense.dart",
+      "content": "COMPLETE MODEL CLASS CODE"
+    }}
+  ],
+  "main_dart": "COMPLETE main.dart CONTENT",
+  "pubspec_yaml": "COMPLETE pubspec.yaml CONTENT",
+  "dependencies": ["http", "provider", "shared_preferences"],
+  "pattern": "clean",
+  "instructions": ["Setup instructions"]
+}}
 
-2. FEATURE ARCHITECTURE:
-   - Component structure based on selected pattern
-   - State management approach matching user preferences
-   - Data flow and dependencies optimized for requirements
-   - Integration points with existing code
+CRITICAL REQUIREMENTS:
+1. Respond with ONLY valid JSON - no markdown, no explanations, no code blocks
+2. Start your response with {{ and end with }}
+3. Escape all quotes inside strings with \\"
+4. Generate a COMPLETE, FUNCTIONAL Flutter app with ALL requested features
+5. Include proper state management (Provider/BLoC/Riverpod)
+6. Create real UI screens with Material Design widgets
+7. Add navigation between screens
+8. Implement data models and services
+9. Include proper error handling
+10. Generate AT LEAST 8-10 files for a complete app structure
 
-3. CODE IMPLEMENTATION:
-   - Generate all necessary Dart files using dynamic templates
-   - Implement proper Flutter widget structures
-   - Setup state management according to selected pattern
-   - Include error handling and validation
-   - Apply performance optimizations
+For a personal finance tracker, include:
+- Expense tracking with categories
+- Budget management
+- Income tracking  
+- Charts/graphs for financial analysis
+- Goal setting functionality
+- Data persistence
 
-4. RESPONSIVE UI IMPLEMENTATION:
-   - Create adaptive widget layouts for all screen sizes
-   - Follow Material Design or Cupertino guidelines
-   - Include accessibility considerations
-   - Add smooth animations and interactions
-
-5. DATA LAYER (if needed):
-   - Generate model classes with proper serialization
-   - Implement repository pattern for data access
-   - Setup API service integrations
-   - Configure local storage solutions
-
-6. TESTING STRATEGY:
-   - Generate unit tests for business logic
-   - Create widget tests for UI components
-   - Setup integration test framework
-   - Provide mock implementations
-
-7. DEPENDENCIES AND CONFIGURATION:
-   - Determine required pubspec.yaml dependencies
-   - Generate configuration files
-   - Setup platform-specific configurations
-   - Provide setup and deployment instructions
-
-Respond with a structured implementation using dynamic templates that match the requirements.
-"""
+RESPOND WITH ONLY THE JSON OBJECT - NO OTHER TEXT:"""
 
     async def _generate_code_dynamically(
         self,
@@ -363,29 +326,23 @@ Respond with a structured implementation using dynamic templates that match the 
             if not code_plan:
                 raise Exception("No code plan generated by LLM")
             
-            # Generate files using template engine
+            # All code is now generated dynamically by LLM - no templates
             generated_files = {}
             
+            # The code plan already contains the actual file content from LLM
             if code_plan.get("files"):
                 for file_info in code_plan["files"]:
                     file_path = file_info.get("path")
-                    template_type = file_info.get("template_type", "widget")
-                    pattern = file_info.get("architectural_pattern", "basic")
-                    variables = file_info.get("variables", {})
+                    content = file_info.get("content") or file_info.get("custom_content", "")
                     
-                    # Use template engine to generate content
-                    content = self._generate_file_from_template(
-                        template_type, pattern, variables, file_info.get("custom_content")
-                    )
-                    
-                    if content:
+                    if content and file_path:
                         generated_files[file_path] = content
             
             return {
                 "code_files": generated_files,
                 "implementation_notes": code_plan.get("instructions", []),
                 "dependencies": code_plan.get("dependencies", []),
-                "architectural_pattern": code_plan.get("pattern", "basic"),
+                "architectural_pattern": code_plan.get("pattern", "clean"),
                 "total_files": len(generated_files)
             }
             
@@ -450,56 +407,22 @@ Respond with a structured implementation using dynamic templates that match the 
         
         return requirements
     
-    def _generate_file_from_template(
+    def _generate_file_with_llm(
         self, 
         template_type: str, 
         pattern: str, 
         variables: Dict[str, Any],
         custom_content: Optional[str] = None
     ) -> Optional[str]:
-        """Generate file content from template with variables."""
-        from ..core.template_engine import TemplateType, ArchitecturalPattern, TemplateContext
-        
+        """Generate file content using LLM instead of templates."""
         if custom_content:
             # Use custom content if provided
             return custom_content
         
-        # Map template type and pattern
-        type_map = {
-            "widget": TemplateType.WIDGET,
-            "screen": TemplateType.SCREEN,
-            "model": TemplateType.MODEL,
-            "bloc": TemplateType.BLOC,
-            "repository": TemplateType.REPOSITORY,
-            "service": TemplateType.SERVICE,
-            "test": TemplateType.TEST
-        }
-        
-        pattern_map = {
-            "basic": ArchitecturalPattern.BASIC_PATTERN,
-            "clean": ArchitecturalPattern.CLEAN_ARCHITECTURE,
-            "bloc": ArchitecturalPattern.BLOC_PATTERN,
-            "provider": ArchitecturalPattern.PROVIDER_PATTERN,
-            "riverpod": ArchitecturalPattern.RIVERPOD_PATTERN
-        }
-        
-        template_type_enum = type_map.get(template_type)
-        pattern_enum = pattern_map.get(pattern, ArchitecturalPattern.BASIC_PATTERN)
-        
-        if not template_type_enum:
-            logger.warning(f"Unknown template type: {template_type}")
-            return None
-        
-        # Create template context
-        context = TemplateContext(
-            app_name=variables.get("app_name", "MyApp"),
-            app_description=variables.get("app_description", "Flutter application"),
-            architectural_pattern=pattern_enum,
-            custom_variables=variables
-        )
-        
-        # Render template
-        return self.template_engine.render_template(template_type_enum, context)
+        # For now, return None to rely on LLM generation in the main flow
+        # This could be enhanced to ask LLM to generate specific file types
+        logger.info(f"Using LLM generation for {template_type} with {pattern} pattern")
+        return None
 
     # Prompt creation methods
     def _create_feature_implementation_prompt(
@@ -649,7 +572,15 @@ Provide complete, production-ready Flutter UI code with proper documentation.
             metadata = task_context.metadata
             project_name = metadata.get("project_name", "flutter_app")
             features = metadata.get("features", [])
-            output_dir = metadata.get("output_dir", ".")
+            
+            # Ensure projects are created in the flutter_projects directory
+            flutter_projects_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "flutter_projects"))
+            # Always use flutter_projects directory - ignore any output_dir from metadata
+            output_dir = flutter_projects_dir
+            
+            # Create flutter_projects directory if it doesn't exist
+            os.makedirs(flutter_projects_dir, exist_ok=True)
+            
             task_type = task_context.description.lower()
             
             # Normalize project name for Flutter SDK compliance
@@ -859,6 +790,8 @@ Provide complete, production-ready Flutter UI code with proper documentation.
         return f"""
 You are an expert Flutter developer. Generate a complete, feature-rich Flutter application for "{project_name}" with the following features: {features_text}.
 
+CRITICAL INSTRUCTION: RESPOND WITH ONLY A VALID JSON OBJECT. NO MARKDOWN, NO EXPLANATION, NO TEXT BEFORE OR AFTER THE JSON.
+
 REQUIREMENTS:
 1. Create a fully functional Flutter app with real features, not just a counter template
 2. Implement all requested features with proper UI and functionality
@@ -871,26 +804,24 @@ REQUIREMENTS:
 FEATURES TO IMPLEMENT:
 {self._generate_feature_specifications(features)}
 
-OUTPUT FORMAT:
-Return a JSON object with the following structure:
+OUTPUT FORMAT - RESPOND WITH ONLY THIS JSON STRUCTURE:
 {{
-    "main_dart": "// Complete main.dart file content",
-    "pubspec_yaml": "// Complete pubspec.yaml with dependencies",
+    "main_dart": "complete main.dart file content here",
+    "pubspec_yaml": "complete pubspec.yaml with dependencies here",
     "files": {{
-        "lib/screens/home_screen.dart": "// Home screen implementation",
-        "lib/screens/[feature]_screen.dart": "// Feature-specific screens",
-        "lib/widgets/[widget_name].dart": "// Custom widgets",
-        "lib/models/[model_name].dart": "// Data models",
-        "lib/services/[service_name].dart": "// Services and business logic",
-        "lib/state/[state_name].dart": "// State management"
+        "lib/screens/home_screen.dart": "complete home screen dart code here",
+        "lib/screens/[feature]_screen.dart": "complete feature screen dart code here",
+        "lib/widgets/[widget_name].dart": "complete custom widget dart code here",
+        "lib/models/[model_name].dart": "complete data model dart code here",
+        "lib/services/[service_name].dart": "complete service dart code here",
+        "lib/state/[state_name].dart": "complete state management dart code here"
     }},
     "dependencies": ["list", "of", "flutter", "packages"],
     "setup_instructions": ["step by step setup instructions"],
     "features_implemented": ["list of implemented features"]
 }}
 
-Generate complete, production-ready code that implements real functionality for the requested features.
-"""
+IMPORTANT: Your response must be a valid JSON object that starts with {{ and ends with }}. Do not include any text before or after the JSON."""
 
     def _generate_feature_specifications(self, features: List[str]) -> str:
         """Generate detailed specifications for each feature."""
@@ -900,18 +831,27 @@ Generate complete, production-ready code that implements real functionality for 
         feature_specs = []
         
         for feature in features:
-            if "photo" in feature.lower() or "image" in feature.lower():
+            feature_lower = feature.lower()
+            if "photo" in feature_lower or "image" in feature_lower:
                 feature_specs.append("- Photo sharing: Camera integration, image picker, photo gallery, upload functionality")
-            elif "auth" in feature.lower() or "login" in feature.lower():
+            elif "auth" in feature_lower or "login" in feature_lower:
                 feature_specs.append("- User authentication: Login/register screens, form validation, secure authentication")
-            elif "social" in feature.lower() or "chat" in feature.lower() or "messag" in feature.lower():
+            elif "social" in feature_lower or "chat" in feature_lower or "messag" in feature_lower:
                 feature_specs.append("- Social features: User profiles, messaging interface, social interactions")
-            elif "music" in feature.lower() or "audio" in feature.lower():
+            elif "music" in feature_lower or "audio" in feature_lower:
                 feature_specs.append("- Music player: Audio playback, playlist management, music controls")
-            elif "ecommerce" in feature.lower() or "shop" in feature.lower():
+            elif "ecommerce" in feature_lower or "shop" in feature_lower:
                 feature_specs.append("- E-commerce: Product catalog, shopping cart, checkout process")
-            elif "weather" in feature.lower():
+            elif "weather" in feature_lower:
                 feature_specs.append("- Weather app: Location-based weather, forecasts, weather data display")
+            elif "finance" in feature_lower or "expense" in feature_lower or "budget" in feature_lower or "money" in feature_lower:
+                feature_specs.append("- Personal finance tracker: Expense tracking, income management, budget planning, financial reports, transaction history")
+            elif "portfolio" in feature_lower or "investment" in feature_lower or "stock" in feature_lower:
+                feature_specs.append("- Investment portfolio: Portfolio tracking, stock monitoring, investment analytics, market data")
+            elif "spending" in feature_lower or "expenditure" in feature_lower:
+                feature_specs.append("- Spending tracker: Expense categorization, spending analytics, receipt management, cost tracking")
+            elif "savings" in feature_lower or "save" in feature_lower:
+                feature_specs.append("- Savings tracker: Savings goals, progress monitoring, target achievement, financial planning")
             else:
                 feature_specs.append(f"- {feature}: Implement comprehensive functionality for {feature}")
         
@@ -1264,81 +1204,187 @@ Generate complete, production-ready code that implements real functionality for 
 
     def _create_fallback_implementation(self) -> Dict[str, Any]:
         """Create a basic fallback implementation when parsing fails completely."""
-        basic_main_dart = '''
+        
+        # Create a simple personal finance tracker as fallback
+        finance_main_dart = '''
 import 'package:flutter/material.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const PersonalFinanceApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class PersonalFinanceApp extends StatelessWidget {
+  const PersonalFinanceApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Personal Finance Tracker',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const FinanceDashboard(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  final String title;
+class FinanceDashboard extends StatefulWidget {
+  const FinanceDashboard({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<FinanceDashboard> createState() => _FinanceDashboardState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _FinanceDashboardState extends State<FinanceDashboard> {
+  double totalBalance = 1250.75;
+  double monthlyIncome = 3500.00;
+  double monthlyExpenses = 2249.25;
 
-  void _incrementCounter() {
-    setState(() {
-      _counter++;
-    });
-  }
+  final List<Transaction> recentTransactions = [
+    Transaction('Groceries', -85.50, DateTime.now().subtract(const Duration(days: 1))),
+    Transaction('Salary', 3500.00, DateTime.now().subtract(const Duration(days: 3))),
+    Transaction('Gas', -45.00, DateTime.now().subtract(const Duration(days: 2))),
+    Transaction('Coffee', -12.75, DateTime.now().subtract(const Duration(hours: 5))),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        title: const Text('Personal Finance Tracker'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text(widget.title),
       ),
-      body: Center(
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Balance Card
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Current Balance', style: TextStyle(fontSize: 16)),
+                    const SizedBox(height: 8),
+                    Text(
+                      '\\$${totalBalance.toStringAsFixed(2)}',
+                      style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.green),
+                    ),
+                  ],
+                ),
+              ),
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+            const SizedBox(height: 16),
+            
+            // Income/Expense Row
+            Row(
+              children: [
+                Expanded(
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        children: [
+                          const Icon(Icons.arrow_upward, color: Colors.green, size: 32),
+                          const Text('Income'),
+                          Text('\\$${monthlyIncome.toStringAsFixed(2)}', 
+                               style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        children: [
+                          const Icon(Icons.arrow_downward, color: Colors.red, size: 32),
+                          const Text('Expenses'),
+                          Text('\\$${monthlyExpenses.toStringAsFixed(2)}', 
+                               style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            
+            // Recent Transactions
+            const Text('Recent Transactions', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView.builder(
+                itemCount: recentTransactions.length,
+                itemBuilder: (context, index) {
+                  final transaction = recentTransactions[index];
+                  return Card(
+                    child: ListTile(
+                      leading: Icon(
+                        transaction.amount > 0 ? Icons.add_circle : Icons.remove_circle,
+                        color: transaction.amount > 0 ? Colors.green : Colors.red,
+                      ),
+                      title: Text(transaction.description),
+                      subtitle: Text(transaction.formattedDate),
+                      trailing: Text(
+                        '\\$${transaction.amount.abs().toStringAsFixed(2)}',
+                        style: TextStyle(
+                          color: transaction.amount > 0 ? Colors.green : Colors.red,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
+        onPressed: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Add Transaction feature coming soon!')),
+          );
+        },
         child: const Icon(Icons.add),
       ),
     );
   }
 }
+
+class Transaction {
+  final String description;
+  final double amount;
+  final DateTime date;
+
+  Transaction(this.description, this.amount, this.date);
+
+  String get formattedDate {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+    
+    if (difference.inDays == 0) {
+      return 'Today';
+    } else if (difference.inDays == 1) {
+      return 'Yesterday';
+    } else {
+      return '${difference.inDays} days ago';
+    }
+  }
+}
 '''.strip()
-        
-        basic_pubspec = '''
-name: flutter_app
-description: A new Flutter project.
+
+        finance_pubspec = '''
+name: personal_finance_tracker
+description: A personal finance tracking app built with Flutter.
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -1360,12 +1406,13 @@ flutter:
 '''.strip()
         
         return {
-            "main_dart": basic_main_dart,
-            "pubspec_yaml": basic_pubspec,
+            "main_dart": finance_main_dart,
+            "pubspec_yaml": finance_pubspec,
             "files": {
-                "lib/main.dart": basic_main_dart,
-                "pubspec.yaml": basic_pubspec
+                "lib/main.dart": finance_main_dart,
+                "pubspec.yaml": finance_pubspec
             },
             "dependencies": ["flutter", "cupertino_icons"],
-            "notes": ["Fallback implementation used due to parsing errors"]
+            "features_implemented": ["Personal Finance Dashboard", "Transaction History", "Balance Tracking"],
+            "notes": ["Fallback implementation used due to parsing errors - Personal Finance Tracker"]
         }

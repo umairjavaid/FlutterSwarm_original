@@ -111,72 +111,36 @@ class FileSystemTool(BaseTool):
             }
         }
 
-    def _load_dynamic_templates(self) -> Dict[str, str]:
-        """Load templates dynamically from template engine."""
-        from ..template_engine import get_template_engine, TemplateType, ArchitecturalPattern
-        
-        template_engine = get_template_engine()
-        templates = {}
-        
-        # Load base templates for different types
-        template_types = [
-            TemplateType.WIDGET,
-            TemplateType.MODEL,
-            TemplateType.BLOC,
-            TemplateType.REPOSITORY,
-            TemplateType.SERVICE,
-            TemplateType.SCREEN
-        ]
-        
-        for template_type in template_types:
-            template = template_engine.get_template(template_type, ArchitecturalPattern.BASIC_PATTERN)
-            if template:
-                templates[template_type.value] = template.source
-        
-        return templates
-
     async def get_usage_examples(self) -> List[Dict[str, Any]]:
         """Provide dynamic example usage scenarios for agent learning."""
         return [
             {
-                "scenario": "Create Flutter widget from template",
-                "operation": "create_from_template",
+                "scenario": "Create Flutter widget file",
+                "operation": "write_file",
                 "parameters": {
-                    "template_type": "widget",
-                    "file_path": "lib/widgets/custom_button.dart",
-                    "variables": {
-                        "widget_name": "CustomButton",
-                        "widget_type": "StatelessWidget"
-                    }
+                    "path": "lib/widgets/custom_button.dart",
+                    "content": "import 'package:flutter/material.dart';\n\nclass CustomButton extends StatelessWidget {\n  const CustomButton({Key? key}) : super(key: key);\n\n  @override\n  Widget build(BuildContext context) {\n    return ElevatedButton(\n      onPressed: () {},\n      child: Text('Custom Button'),\n    );\n  }\n}"
                 },
                 "expected_outcome": "Creates a new widget file with proper Flutter structure"
             },
             {
-                "scenario": "Generate model class with JSON serialization",
-                "operation": "create_from_template", 
+                "scenario": "Create model class with JSON serialization",
+                "operation": "write_file",
                 "parameters": {
-                    "template_type": "model",
-                    "file_path": "lib/models/user.dart",
-                    "variables": {
-                        "model_name": "User",
-                        "fields": ["id", "name", "email"]
-                    }
+                    "path": "lib/models/user.dart",
+                    "content": "class User {\n  final String id;\n  final String name;\n  final String email;\n\n  User({required this.id, required this.name, required this.email});\n\n  factory User.fromJson(Map<String, dynamic> json) => User(\n    id: json['id'],\n    name: json['name'],\n    email: json['email'],\n  );\n\n  Map<String, dynamic> toJson() => {\n    'id': id,\n    'name': name,\n    'email': email,\n  };\n}"
                 },
                 "expected_outcome": "Creates model with JSON serialization methods"
             },
             {
-                "scenario": "Setup BLoC pattern files",
-                "operation": "create_from_template",
+                "scenario": "Manage pubspec dependencies",
+                "operation": "manage_pubspec",
                 "parameters": {
-                    "template_type": "bloc",
-                    "file_path": "lib/blocs/user_bloc.dart",
-                    "variables": {
-                        "bloc_name": "User",
-                        "events": ["LoadUser", "UpdateUser"],
-                        "states": ["UserLoading", "UserLoaded", "UserError"]
-                    }
+                    "action": "add_dependency",
+                    "package_name": "bloc",
+                    "version": "^8.1.0"
                 },
-                "expected_outcome": "Creates complete BLoC structure with events and states"
+                "expected_outcome": "Adds bloc dependency to pubspec.yaml"
             }
         ]
 
@@ -233,24 +197,6 @@ class FileSystemTool(BaseTool):
                 },
                 "required_permissions": [ToolPermission.FILE_WRITE],
                 "examples": [{"description": "Write widget with backup", "params": {"path": "lib/widgets/my_widget.dart", "content": "...", "optimize_imports": True}}]
-            },
-            {
-                "name": "create_from_template",
-                "description": "Create a Flutter file from template with advanced customization.",
-                "parameters_schema": {
-                    "type": "object",
-                    "properties": {
-                        "template_type": {"type": "string", "enum": ["widget", "stateful_widget", "model", "service", "screen", "provider", "repository", "test_file"]},
-                        "file_path": {"type": "string"},
-                        "class_name": {"type": "string"},
-                        "variables": {"type": "object", "default": {}},
-                        "create_test": {"type": "boolean", "default": False},
-                        "create_barrel": {"type": "boolean", "default": False}
-                    },
-                    "required": ["template_type", "file_path", "class_name"]
-                },
-                "required_permissions": [ToolPermission.FILE_CREATE],
-                "examples": [{"description": "Create widget with test", "params": {"template": "widget", "path": "lib/widgets/header.dart", "class_name": "HeaderWidget", "create_test": True}}]
             },
             {
                 "name": "manage_pubspec",
@@ -425,24 +371,6 @@ class FileSystemTool(BaseTool):
             
             return True, None
             
-        elif operation == "create_from_template":
-            required = ["template_type", "file_path"]
-            missing = [p for p in required if p not in params]
-            if missing:
-                return False, f"Missing required parameters: {missing}"
-            
-            valid_templates = ["widget", "model", "bloc", "repository", "service", "screen", "test"]
-            if params["template_type"] not in valid_templates:
-                return False, f"Unknown template: {params['template_type']}"
-            
-            # Validate class name if provided
-            if "class_name" in params:
-                class_name = params["class_name"]
-                if not re.match(r'^[A-Z][a-zA-Z0-9]*$', class_name):
-                    return False, f"Invalid class name '{class_name}': must start with uppercase letter and contain only letters/numbers"
-            
-            return True, None
-            
         elif operation == "manage_pubspec":
             if "action" not in params:
                 return False, "Missing required parameter: action"
@@ -526,8 +454,6 @@ class FileSystemTool(BaseTool):
                 return await self._read_file(params, operation_id)
             elif operation == "write_file":
                 return await self._write_file(params, operation_id)
-            elif operation == "create_from_template":
-                return await self._create_from_template(params, operation_id)
             elif operation == "manage_pubspec":
                 return await self._manage_pubspec(params, operation_id)
             elif operation == "optimize_assets":
@@ -686,105 +612,6 @@ class FileSystemTool(BaseTool):
                 status=ToolStatus.FAILURE,
                 data={},
                 error_message=f"Failed to write file {path}: {str(e)}"
-            )
-
-    async def _create_from_template(self, params: Dict[str, Any]) -> ToolResult:
-        """Create file from dynamic template."""
-        from ..template_engine import get_template_engine, TemplateContext, TemplateType, ArchitecturalPattern
-        
-        try:
-            template_type_str = params.get("template_type")
-            file_path = params.get("file_path")
-            variables = params.get("variables", {})
-            architectural_pattern = params.get("architectural_pattern", "basic")
-            
-            if not template_type_str or not file_path:
-                return ToolResult(
-                    tool_name=self.name,
-                    operation="create_from_template",
-                    status=ToolStatus.FAILED,
-                    error_message="template_type and file_path are required"
-                )
-            
-            # Map string to enum
-            template_type_map = {
-                "widget": TemplateType.WIDGET,
-                "model": TemplateType.MODEL,
-                "bloc": TemplateType.BLOC,
-                "repository": TemplateType.REPOSITORY,
-                "service": TemplateType.SERVICE,
-                "screen": TemplateType.SCREEN,
-                "test": TemplateType.TEST
-            }
-            
-            template_type = template_type_map.get(template_type_str)
-            if not template_type:
-                return ToolResult(
-                    tool_name=self.name,
-                    operation="create_from_template",
-                    status=ToolStatus.FAILED,
-                    error_message=f"Unknown template type: {template_type_str}"
-                )
-            
-            # Map architectural pattern
-            arch_pattern_map = {
-                "basic": ArchitecturalPattern.BASIC_PATTERN,
-                "clean": ArchitecturalPattern.CLEAN_ARCHITECTURE,
-                "bloc": ArchitecturalPattern.BLOC_PATTERN,
-                "provider": ArchitecturalPattern.PROVIDER_PATTERN
-            }
-            
-            arch_pattern = arch_pattern_map.get(architectural_pattern, ArchitecturalPattern.BASIC_PATTERN)
-            
-            # Create template context
-            context = TemplateContext(
-                app_name=variables.get("app_name", "MyApp"),
-                app_description=variables.get("app_description", "Flutter application"),
-                architectural_pattern=arch_pattern,
-                custom_variables=variables
-            )
-            
-            # Render template
-            template_engine = get_template_engine()
-            content = template_engine.render_template(template_type, context)
-            
-            if not content:
-                return ToolResult(
-                    tool_name=self.name,
-                    operation="create_from_template",
-                    status=ToolStatus.FAILED,
-                    error_message=f"Failed to render template: {template_type_str}"
-                )
-            
-            # Write file
-            file_path_obj = Path(file_path)
-            file_path_obj.parent.mkdir(parents=True, exist_ok=True)
-            file_path_obj.write_text(content, encoding='utf-8')
-            
-            return ToolResult(
-                tool_name=self.name,
-                operation="create_from_template",
-                status=ToolStatus.SUCCESS,
-                data={
-                    "file_path": file_path,
-                    "template_type": template_type_str,
-                    "architectural_pattern": architectural_pattern,
-                    "content_length": len(content),
-                    "variables_used": list(variables.keys())
-                },
-                metadata={
-                    "creation_time": datetime.utcnow().isoformat(),
-                    "template_engine": "dynamic"
-                }
-            )
-            
-        except Exception as e:
-            logger.error(f"Template creation failed: {e}")
-            return ToolResult(
-                tool_name=self.name,
-                operation="create_from_template",
-                status=ToolStatus.FAILED,
-                error_message=str(e)
             )
 
     def _validate_pubspec_changes(self, current_content: str, new_content: str) -> Tuple[bool, Optional[str]]:

@@ -159,85 +159,29 @@ class LocalFallbackProvider(BaseLLMProvider):
     
     def __init__(self):
         super().__init__("local_fallback", rate_limit=100)
-        self.flutter_templates = {
-            "architecture": {
-                "clean_architecture": """
-                ## Clean Architecture for Music Streaming App
-
-                ### Recommended Architecture:
-                - **Clean Architecture** with dependency injection using GetIt
-                - **BLoC Pattern** for state management 
-                - **Repository Pattern** for data abstraction
-
-                ### Project Structure:
-                ```
-                lib/
-                ├── core/
-                │   ├── di/               # Dependency injection
-                │   ├── error/           # Error handling
-                │   ├── constants/       # App constants
-                │   └── utils/          # Utilities
-                ├── data/
-                │   ├── repositories/    # Repository implementations
-                │   ├── datasources/     # Local/remote data sources
-                │   └── models/         # Data models
-                ├── domain/
-                │   ├── entities/        # Business entities
-                │   ├── repositories/    # Repository interfaces
-                │   └── usecases/       # Business logic
-                └── presentation/
-                    ├── blocs/          # BLoC state management
-                    ├── pages/          # Screen widgets
-                    └── widgets/        # Reusable widgets
-                ```
-
-                ### Dependencies:
-                - flutter_bloc: ^8.1.3
-                - get_it: ^7.6.4
-                - injectable: ^2.3.2
-                - audio_service: ^0.18.12
-                - just_audio: ^0.9.35
-                """,
-                "implementation": """
-                I'll implement the Flutter music streaming app with the following approach:
-
-                **Tool Usage Required:**
-                1. flutter_sdk: create_project - Initialize new Flutter project
-                2. file_system: create_from_template - Generate clean architecture structure
-                3. flutter_sdk: add_dependencies - Add audio and state management packages
-
-                **Implementation Plan:**
-                1. Create project structure with clean architecture
-                2. Set up dependency injection with GetIt
-                3. Implement audio player with just_audio
-                4. Create BLoC states for music player
-                5. Design modern UI with Material 3
-                6. Add playlist and library management
-                7. Implement background audio service
-
-                **Key Features to Implement:**
-                - Audio playback controls (play/pause/skip)
-                - Playlist management with local storage
-                - Modern UI with dark/light themes
-                - Background audio service
-                - Search and library organization
-                """
-            }
-        }
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         """Generate a realistic Flutter development response based on the prompt."""
         prompt_lower = request.prompt.lower()
         
-        # Determine response content based on prompt
-        response_content = ""
+        # Check if this is a structured JSON request for implementation
+        if ("json" in prompt_lower and "main_dart" in prompt_lower) or \
+           ("personal finance" in prompt_lower and "feature" in prompt_lower):
+            # Generate a complete personal finance tracker JSON response
+            response_content = """{
+    "main_dart": "import 'package:flutter/material.dart';\\n\\nvoid main() {\\n  runApp(const PersonalFinanceApp());\\n}\\n\\nclass PersonalFinanceApp extends StatelessWidget {\\n  const PersonalFinanceApp({super.key});\\n\\n  @override\\n  Widget build(BuildContext context) {\\n    return MaterialApp(\\n      title: 'Personal Finance Tracker',\\n      theme: ThemeData(\\n        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),\\n        useMaterial3: true,\\n      ),\\n      home: const FinanceDashboard(),\\n    );\\n  }\\n}\\n\\nclass FinanceDashboard extends StatefulWidget {\\n  const FinanceDashboard({super.key});\\n\\n  @override\\n  State<FinanceDashboard> createState() => _FinanceDashboardState();\\n}\\n\\nclass _FinanceDashboardState extends State<FinanceDashboard> {\\n  double totalBalance = 1250.75;\\n  double monthlyIncome = 3500.00;\\n  double monthlyExpenses = 2249.25;\\n\\n  @override\\n  Widget build(BuildContext context) {\\n    return Scaffold(\\n      appBar: AppBar(\\n        title: const Text('Personal Finance Tracker'),\\n        backgroundColor: Theme.of(context).colorScheme.inversePrimary,\\n      ),\\n      body: const Center(\\n        child: Column(\\n          children: [\\n            Text('Balance: \\\\$1,250.75', style: TextStyle(fontSize: 24)),\\n            SizedBox(height: 20),\\n            Text('Personal Finance Tracker', style: TextStyle(fontSize: 18)),\\n          ],\\n        ),\\n      ),\\n    );\\n  }\\n}",
+    "pubspec_yaml": "name: personal_finance_tracker\\ndescription: A personal finance tracking app built with Flutter.\\npublish_to: 'none'\\nversion: 1.0.0+1\\n\\nenvironment:\\n  sdk: '>=3.0.0 <4.0.0'\\n\\ndependencies:\\n  flutter:\\n    sdk: flutter\\n  cupertino_icons: ^1.0.2\\n\\ndev_dependencies:\\n  flutter_test:\\n    sdk: flutter\\n  flutter_lints: ^2.0.0\\n\\nflutter:\\n  uses-material-design: true",
+    "files": {
+        "lib/main.dart": "import 'package:flutter/material.dart';\\n\\nvoid main() {\\n  runApp(const PersonalFinanceApp());\\n}\\n\\nclass PersonalFinanceApp extends StatelessWidget {\\n  const PersonalFinanceApp({super.key});\\n\\n  @override\\n  Widget build(BuildContext context) {\\n    return MaterialApp(\\n      title: 'Personal Finance Tracker',\\n      theme: ThemeData(\\n        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),\\n        useMaterial3: true,\\n      ),\\n      home: const FinanceDashboard(),\\n    );\\n  }\\n}\\n\\nclass FinanceDashboard extends StatefulWidget {\\n  const FinanceDashboard({super.key});\\n\\n  @override\\n  State<FinanceDashboard> createState() => _FinanceDashboardState();\\n}\\n\\nclass _FinanceDashboardState extends State<FinanceDashboard> {\\n  double totalBalance = 1250.75;\\n\\n  @override\\n  Widget build(BuildContext context) {\\n    return Scaffold(\\n      appBar: AppBar(\\n        title: const Text('Personal Finance Tracker'),\\n      ),\\n      body: const Center(\\n        child: Column(\\n          children: [\\n            Text('Balance: \\\\$1,250.75', style: TextStyle(fontSize: 24)),\\n            SizedBox(height: 20),\\n            Text('Personal Finance Tracker', style: TextStyle(fontSize: 18)),\\n          ],\\n        ),\\n      ),\\n    );\\n  }\\n}"
+    },
+    "dependencies": ["flutter", "cupertino_icons"],
+    "setup_instructions": ["Run flutter pub get", "Run flutter run"],
+    "features_implemented": ["Personal Finance Dashboard", "Balance Display", "Flutter UI"]
+}"""
         
         # Architecture-related responses
-        if any(keyword in prompt_lower for keyword in ["architecture", "design", "structure", "pattern"]):
-            if "music" in prompt_lower or "audio" in prompt_lower:
-                response_content = self.flutter_templates["architecture"]["clean_architecture"]
-            else:
-                response_content = """
+        elif any(keyword in prompt_lower for keyword in ["architecture", "design", "structure", "pattern"]):
+            response_content = """
             ## Flutter App Architecture Recommendation
 
             ### Recommended Approach:
@@ -258,15 +202,12 @@ class LocalFallbackProvider(BaseLLMProvider):
 
         # Implementation-related responses  
         elif any(keyword in prompt_lower for keyword in ["implement", "create", "build", "develop"]):
-            if "music" in prompt_lower or "audio" in prompt_lower:
-                response_content = self.flutter_templates["architecture"]["implementation"]
-            else:
-                response_content = """
+            response_content = """
             I'll implement the Flutter application following clean architecture principles.
 
             **Tool Usage Required:**
             1. flutter_sdk: create_project - Initialize Flutter project
-            2. file_system: create_from_template - Generate project structure
+            2. file_system: write_file - Generate project files
             3. flutter_sdk: add_dependencies - Add required packages
 
             **Implementation Steps:**
@@ -288,21 +229,12 @@ class LocalFallbackProvider(BaseLLMProvider):
 
             **Recommended Usage:**
             1. Use flutter_sdk for Flutter-specific operations
-            2. Use file_system for template-based code generation
+            2. Use file_system for file-based code generation
             3. Use process_tool for running external commands
             """
         else:
             # Default response
-            response_content = """
-        I understand the task requirements. I'll proceed with implementing the solution following Flutter best practices and clean architecture principles.
-
-        **Next Steps:**
-        1. Analyze requirements in detail
-        2. Design appropriate architecture
-        3. Implement core functionality
-        4. Create comprehensive tests
-        5. Ensure production readiness
-        """
+            response_content = """I understand the task requirements. I'll proceed with implementing the solution following Flutter best practices and clean architecture principles."""
         
         return LLMResponse(
             content=response_content,

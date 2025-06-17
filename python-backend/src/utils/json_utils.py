@@ -11,12 +11,16 @@ def extract_json_from_llm_response(response_text):
     if not response_text or not response_text.strip():
         logger.error("Empty or None response text provided")
         return None
-        
+    
+    logger.debug(f"Attempting to extract JSON from response length: {len(response_text)}")
+    
     # First try to parse the entire response as JSON
     try:
-        return json.loads(response_text)
-    except json.JSONDecodeError:
-        pass
+        parsed = json.loads(response_text.strip())
+        logger.info("Successfully parsed entire response as JSON")
+        return parsed
+    except json.JSONDecodeError as e:
+        logger.debug(f"Direct JSON parsing failed: {e}")
     
     # Look for JSON within the text
     try:
@@ -25,70 +29,72 @@ def extract_json_from_llm_response(response_text):
         
         # Try to parse cleaned text directly
         try:
-            return json.loads(cleaned_text.strip())
-        except json.JSONDecodeError:
-            pass
+            parsed = json.loads(cleaned_text.strip())
+            logger.info("Successfully parsed cleaned response as JSON")
+            return parsed
+        except json.JSONDecodeError as e:
+            logger.debug(f"Cleaned text parsing failed: {e}")
         
-        # More aggressive JSON extraction patterns
+        # More aggressive JSON extraction patterns - look for the main object
         json_patterns = [
+            r'^\s*(\{[\s\S]*\})\s*$',  # Entire response is JSON
+            r'\{[\s\S]*?"files"[\s\S]*?\}(?=\s*$|\s*```|\s*[A-Z][a-z])',  # JSON with files ending at text/code blocks
+            r'\{[\s\S]*?"main_dart"[\s\S]*?\}(?=\s*$|\s*```|\s*[A-Z][a-z])',  # JSON with main_dart
             r'```json\s*(\{[\s\S]*?\})\s*```',  # JSON in markdown blocks
-            r'\{[\s\S]*?"main_dart"[\s\S]*?\}(?=\s*```|\s*$|\s*[A-Z])',  # JSON ending before next section
-            r'\{[\s\S]*?"files"[\s\S]*?\}(?=\s*```|\s*$|\s*[A-Z])',  # JSON with files object
-            r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Basic nested JSON matching
+            r'(\{[\s\S]*?"dependencies"[\s\S]*?\})',  # JSON with dependencies
+            r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Simple balanced braces (non-recursive)
         ]
         
-        for pattern in json_patterns:
-            matches = re.findall(pattern, cleaned_text, re.MULTILINE)
+        for i, pattern in enumerate(json_patterns):
+            matches = re.findall(pattern, cleaned_text, re.MULTILINE | re.DOTALL)
             for match in matches:
                 try:
                     # Handle case where match is a tuple (from capturing groups)
                     json_str = match if isinstance(match, str) else match[0] if match else ""
                     
-                    # Try to fix truncated JSON
+                    # Clean up common issues
+                    json_str = json_str.strip()
+                    if not json_str:
+                        continue
+                        
+                    # Try to fix truncated JSON by balancing braces
                     json_str = _fix_truncated_json(json_str)
                     
                     parsed = json.loads(json_str)
-                    # Validate it's a meaningful JSON object
-                    if isinstance(parsed, dict) and len(parsed) > 0:
-                        return parsed
-                except (json.JSONDecodeError, AttributeError):
+                    logger.info(f"Successfully extracted JSON using pattern {i}")
+                    return parsed
+                except json.JSONDecodeError as e:
+                    logger.debug(f"Pattern {i} failed: {e}")
                     continue
+
+        # Final fallback: Find the first complete JSON object using brace matching
+        start_idx = cleaned_text.find('{')
+        if start_idx != -1:
+            brace_count = 0
+            end_idx = start_idx
+            for i, char in enumerate(cleaned_text[start_idx:], start_idx):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i + 1
+                        break
+            
+            if brace_count == 0:  # Found matching braces
+                potential_json = cleaned_text[start_idx:end_idx]
+                try:
+                    parsed = json.loads(potential_json)
+                    logger.info("Successfully extracted JSON using brace matching")
+                    return parsed
+                except json.JSONDecodeError as e:
+                    logger.debug(f"Brace matching failed: {e}")
         
-        # Try a more aggressive approach - look for lines that start and end with braces
-        lines = cleaned_text.split('\n')
-        json_lines = []
-        in_json = False
-        brace_count = 0
-        
-        for line in lines:
-            stripped = line.strip()
-            if not in_json and stripped.startswith('{'):
-                in_json = True
-                json_lines = [line]
-                brace_count = stripped.count('{') - stripped.count('}')
-            elif in_json:
-                json_lines.append(line)
-                brace_count += stripped.count('{') - stripped.count('}')
-                if brace_count <= 0:
-                    # Try to parse accumulated JSON
-                    potential_json = '\n'.join(json_lines)
-                    try:
-                        # Try to fix any issues with the JSON
-                        potential_json = _fix_truncated_json(potential_json)
-                        parsed = json.loads(potential_json)
-                        if isinstance(parsed, dict) and len(parsed) > 0:
-                            return parsed
-                    except json.JSONDecodeError:
-                        pass
-                    # Reset for next potential JSON block
-                    in_json = False
-                    json_lines = []
-                    brace_count = 0
-        
-        logger.error(f"Failed to extract JSON from: {response_text[:200]}...")
+        logger.error(f"Failed to extract JSON from response. First 500 chars: {response_text[:500]}...")
         return None
+    
     except Exception as e:
-        logger.error(f"Error extracting JSON: {e}")
+        logger.error(f"Error during JSON extraction: {e}")
         return None
 
 

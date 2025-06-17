@@ -621,68 +621,6 @@ Respond with detailed JSON structure containing the complete refactoring plan.
             logger.error(f"Pattern recommendation failed: {e}")
             return ArchitecturePattern.CLEAN_ARCHITECTURE
 
-    async def generate_project_template(
-        self,
-        project_name: str,
-        architecture_pattern: ArchitecturePattern,
-        features: List[str]
-    ) -> Dict[str, Any]:
-        """Generate a project template with specified architecture."""
-        
-        template_prompt = f"""
-        Generate a complete Flutter project template with the following specifications:
-        
-        Project Name: {project_name}
-        Architecture Pattern: {architecture_pattern.value}
-        Required Features: {features}
-        
-        Provide:
-        1. Complete folder structure
-        2. Essential files with basic implementation
-        3. Dependency configuration (pubspec.yaml)
-        4. Main application setup
-        5. Example implementations for each layer/module
-        6. Basic routing and navigation setup
-        7. State management boilerplate
-        8. Testing structure
-        
-        Generate actual code snippets for key files following Flutter best practices.
-        """
-        
-        try:
-            template = await self.execute_llm_task(
-                user_prompt=template_prompt,
-                context={
-                    "project_name": project_name,
-                    "pattern": architecture_pattern.value,
-                    "features": features
-                },
-                structured_output=True
-            )
-            
-            # Store template in memory for future reference
-            await self.memory_manager.store_memory(
-                content=f"Project template generated for {project_name} using {architecture_pattern.value}",
-                metadata={
-                    "type": "project_template",
-                    "project_name": project_name,
-                    "pattern": architecture_pattern.value,
-                    "features": features
-                },
-                importance=0.8,
-                long_term=True
-            )
-            
-            return template
-            
-        except Exception as e:
-            logger.error(f"Template generation failed: {e}")
-            return {
-                "error": f"Failed to generate template: {str(e)}",
-                "folder_structure": {},
-                "files": {}
-            }
-
     async def validate_architecture_compliance(
         self,
         project_context: Dict[str, Any]

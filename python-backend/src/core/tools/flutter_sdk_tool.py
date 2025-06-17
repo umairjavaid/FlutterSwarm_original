@@ -470,14 +470,17 @@ class FlutterSDKTool(BaseTool):
         description = params.get("description", f"A new Flutter project: {project_name}")
         platforms = params.get("platforms", ["android", "ios"])
         project_dir = params.get("project_dir")
+        overwrite = params.get("overwrite", False)
         
         try:
-            # Determine output directory - FIXED: Use correct flutter_projects directory
+            # Determine output directory - Use flutter_projects from workspace root
             if project_dir:
                 output_dir = Path(project_dir)
             else:
-                # Use the flutter_projects directory from the workspace root (not python-backend)
-                workspace_root = Path(__file__).parent.parent.parent.parent.parent
+                # Use the flutter_projects directory from the workspace root
+                # Current file: .../python-backend/src/core/tools/flutter_sdk_tool.py
+                # Workspace root: .../FlutterSwarm (4 levels up from src/core/tools/)
+                workspace_root = Path(__file__).parent.parent.parent.parent
                 flutter_projects_dir = workspace_root / "flutter_projects"
                 output_dir = flutter_projects_dir
             
@@ -486,11 +489,16 @@ class FlutterSDKTool(BaseTool):
             
             # Check if project already exists
             if project_path.exists():
-                return ToolResult(
-                    status=ToolStatus.FAILURE,
-                    error_message=f"Project {project_name} already exists at {project_path}",
-                    operation_id=operation_id
-                )
+                if overwrite:
+                    logger.info(f"Project {project_name} already exists, but overwrite=True, so removing existing project")
+                    import shutil
+                    shutil.rmtree(str(project_path))
+                else:
+                    return ToolResult(
+                        status=ToolStatus.FAILURE,
+                        error_message=f"Project {project_name} already exists at {project_path}",
+                        operation_id=operation_id
+                    )
             
             # Create Flutter project using standard command WITHOUT templates
             create_cmd = [self.flutter_executable, "create"]
@@ -508,6 +516,12 @@ class FlutterSDKTool(BaseTool):
             
             logger.info(f"Creating Flutter project: {' '.join(create_cmd)}")
             logger.info(f"Working directory: {output_dir}")
+            logger.info(f"Project will be created at: {project_path}")
+            logger.info(f"Current working directory: {os.getcwd()}")
+            
+            # Ensure we're in the right directory
+            os.chdir(str(output_dir))
+            logger.info(f"Changed to directory: {os.getcwd()}")
             
             # Execute flutter create command
             result = await self._run_flutter_command(
