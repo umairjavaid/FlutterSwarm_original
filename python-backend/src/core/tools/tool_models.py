@@ -281,6 +281,28 @@ class ToolCapabilities:
         }
 
 
+@dataclass
+class ToolOperation:
+    """
+    Describes an operation that a tool can perform.
+    
+    This includes metadata about the operation, its parameters,
+    expected results, and usage examples.
+    """
+    name: str
+    description: str
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    required_params: List[str] = field(default_factory=list)
+    example_usage: Optional[Dict[str, Any]] = None
+    
+    def validate_params(self, params: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """Validate that required parameters are provided."""
+        missing_params = [p for p in self.required_params if p not in params]
+        if missing_params:
+            return False, f"Missing required parameters: {', '.join(missing_params)}"
+        return True, None
+
+
 # Utility Functions
 
 def create_success_result(
@@ -555,3 +577,4 @@ class ToolExecutionError(Exception):
 class ToolSchemaError(Exception):
     """Raised when tool schema is invalid."""
     pass
+

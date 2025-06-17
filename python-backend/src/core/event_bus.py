@@ -476,3 +476,21 @@ class EventBus:
         """Cleanup when object is destroyed."""
         if self._message_processor_task and not self._message_processor_task.done():
             self._message_processor_task.cancel()
+    
+    def get_message_count(self) -> int:
+        """Get the total number of messages processed by the event bus."""
+        count = 0
+        for subscriptions in self.subscriptions.values():
+            for subscription in subscriptions:
+                count += subscription.message_count
+        return count
+    
+    def get_successful_deliveries(self) -> int:
+        """Get the number of successful message deliveries."""
+        # In a real implementation, we would track this separately
+        # For now, just return the total message count
+        return self.get_message_count()
+    
+    def get_active_topics(self) -> List[str]:
+        """Get the list of active topics."""
+        return list(self.subscriptions.keys())

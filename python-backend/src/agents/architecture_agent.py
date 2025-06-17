@@ -21,6 +21,7 @@ from ..models.project_models import (
     ProjectType, CodeMetrics
 )
 from ..config import get_logger
+from ..utils.json_utils import extract_json_from_llm_response
 
 logger = get_logger("architecture_agent")
 
@@ -1354,3 +1355,16 @@ Respond with detailed JSON structure containing the complete refactoring plan.
                 result={"error": str(e)},
                 agent_id=self.agent_id
             )
+
+    async def process_llm_response(self, response_text):
+        """Process the LLM response with improved JSON handling."""
+        try:
+            parsed_json = extract_json_from_llm_response(response_text)
+            if parsed_json:
+                return parsed_json
+            else:
+                self.logger.error("Failed to parse LLM response as JSON")
+                return {"error": "Failed to parse response"}
+        except Exception as e:
+            self.logger.error(f"Error processing LLM response: {e}")
+            return {"error": f"Processing error: {str(e)}"}

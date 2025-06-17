@@ -353,6 +353,35 @@ class FlutterSwarmCLI:
         
         return passed == total
 
+    async def create_project(self, project_name, project_type="app"):
+        """Create a Flutter project in the flutter_projects directory."""
+        flutter_projects_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flutter_projects")
+        os.makedirs(flutter_projects_dir, exist_ok=True)
+        
+        print(f"📁 Creating Flutter {project_type} '{project_name}' in {flutter_projects_dir}...")
+        
+        try:
+            # Use asyncio subprocess to run the Flutter command asynchronously
+            process = await asyncio.create_subprocess_exec(
+                "flutter", "create", 
+                f"--{project_type}" if project_type != "app" else "--template=app",
+                os.path.join(flutter_projects_dir, project_name),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                print(f"✅ Flutter project '{project_name}' created successfully!")
+                return os.path.join(flutter_projects_dir, project_name)
+            else:
+                print(f"❌ Failed to create Flutter project: {stderr.decode()}")
+                return None
+        except Exception as e:
+            print(f"❌ Error creating Flutter project: {e}")
+            return None
+
 
 async def main():
     """Main CLI function."""
@@ -383,6 +412,11 @@ async def main():
     
     # Shutdown command
     subparsers.add_parser('shutdown', help='Shutdown the system')
+    
+    # Create project command
+    create_parser = subparsers.add_parser('create', help='Create a new Flutter project')
+    create_parser.add_argument('name', help='Project name')
+    create_parser.add_argument('--type', default='app', help='Project type (app, plugin, web, desktop)')
     
     args = parser.parse_args()
     
@@ -425,6 +459,13 @@ async def main():
             await interactive_mode(cli)
         
         elif args.command == 'shutdown':
+            await cli.shutdown()
+        
+        elif args.command == 'create':
+            if not await cli.initialize():
+                return
+            project_type = args.type if args.type in ["app", "plugin", "web", "desktop"] else "app"
+            await cli.create_project(args.name, project_type)
             await cli.shutdown()
     
     except KeyboardInterrupt:

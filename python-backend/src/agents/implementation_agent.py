@@ -10,6 +10,8 @@ import json
 import json
 import uuid
 import re
+import os
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +47,35 @@ from ..models.tool_models import ToolUsagePlan, ToolOperation, TaskOutcome, Tool
 from ..config import get_logger
 
 logger = get_logger("implementation_agent")
+
+async def create_flutter_project(self, project_name, project_dir=None, project_type="app"):
+    """Create a new Flutter project asynchronously."""
+    if not project_dir:
+        # Ensure we use the flutter_projects directory
+        project_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 
+                                   "flutter_projects")
+        
+    # Create the directory if it doesn't exist
+    os.makedirs(project_dir, exist_ok=True)
+    
+    full_path = os.path.join(project_dir, project_name)
+    
+    # Use asyncio subprocess to run the Flutter command asynchronously
+    process = await asyncio.create_subprocess_exec(
+        "flutter", "create", 
+        f"--{project_type}" if project_type != "app" else "--template=app",
+        full_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    
+    stdout, stderr = await process.communicate()
+    
+    if process.returncode != 0:
+        raise Exception(f"Flutter project creation failed: {stderr.decode()}")
+    
+    self.logger.info(f"Successfully created Flutter project at: {full_path}")
+    return full_path
 
 async def process_task(self, task_context):
     try:
