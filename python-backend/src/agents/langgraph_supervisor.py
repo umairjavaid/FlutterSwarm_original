@@ -777,27 +777,13 @@ class SupervisorAgent:
                 }
             elif current_status == "in_progress":
                 # Mark as completed and write Flutter project files
-                # Extract project name from state context
-                project_name = state.get("project_context", {}).get("project_name", "harmony_music_player")
-                project_path = await self._write_flutter_project(project_name)
+                # Let the implementation complete without injecting hardcoded templates
                 newly_completed[task_id] = {
                     **task_info,
-                    "status": "completed",
+                    "status": "completed", 
                     "progress": 1.0,
                     "completed_at": datetime.utcnow().isoformat(),
-                    "result": {
-                        "status": "success",
-                        "summary": f"Successfully created Flutter app at {project_path}",
-                        "project_path": project_path
-                    },
-                    "deliverables": {
-                        "flutter_app": {
-                            "project_path": project_path,
-                            "pubspec.yaml": self._generate_pubspec_yaml(project_name),
-                            "main.dart": self._generate_main_dart(project_name),
-                            "lib/main_app.dart": self._generate_main_app_dart(project_name)
-                        }
-                    }
+                    "result": task_info.get("result", {"status": "completed"})
                 }
             else:
                 # Keep as is
@@ -1410,173 +1396,6 @@ class SupervisorAgent:
         except Exception as e:
             logger.error(f"Exception while creating Flutter project: {e}")
             return f"Failed to create Flutter project due to exception: {str(e)}"
-    
-    async def _write_flutter_project(self, project_name: str) -> str:
-        """
-        Create a real Flutter project using the FlutterSDKTool via the ToolRegistry.
-        Returns the created project path if successful, or raises/logs errors.
-        """
-        from ..core.tools.tool_registry import ToolRegistry
-        # Prepare parameters for project creation
-        params = {
-            "project_name": project_name,
-            "description": f"A new Flutter project: {project_name}",
-            "template_type": "basic",
-            "features": ["home"],
-            "platforms": ["android", "ios"]
-        }
-        try:
-            # Get the FlutterSDKTool from the ToolRegistry
-            registry = ToolRegistry.get_instance()
-            flutter_tool = registry.tools.get("flutter_sdk")
-            if not flutter_tool:
-                logger.error("FlutterSDKTool not found in ToolRegistry.")
-                return ""
-            
-            # Use await for async execution in async context
-            result = await flutter_tool.execute("create_project", params)
-            if result.status.name == "SUCCESS":
-                logger.info(f"Successfully created Flutter project: {project_name} at {result.data.get('project_path')}")
-                return result.data.get("project_path", "")
-            else:
-                logger.error(f"Flutter project creation failed: {result.error_message}")
-                return ""
-        except Exception as e:
-            logger.error(f"Exception during Flutter project creation: {e}")
-            return ""
-
-    def _generate_pubspec_yaml(self, project_name: str = "flutter_app") -> str:
-        """Generate pubspec.yaml content with dynamic project name."""
-        return f"""# pubspec.yaml for {project_name}
-name: {project_name}
-description: A comprehensive music streaming Flutter application.
-version: 1.0.0+1
-
-environment:
-  sdk: '>=3.0.0 <4.0.0'
-
-dependencies:
-  flutter:
-    sdk: flutter
-  
-  # State Management
-  flutter_bloc: ^8.1.3
-  
-  # Audio Playback
-  just_audio: ^0.9.35
-  audio_service: ^0.18.10
-  
-  # Storage
-  hive: ^2.2.3
-  hive_flutter: ^1.1.0
-  path_provider: ^2.1.1
-  
-  # UI Components
-  cupertino_icons: ^1.0.6
-  cached_network_image: ^3.3.0
-  
-  # Utilities
-  equatable: ^2.0.5
-  get_it: ^7.6.4
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^3.0.0
-  hive_generator: ^2.0.1
-  build_runner: ^2.4.7
-
-flutter:
-  uses-material-design: true
-  assets:
-    - assets/images/
-    - assets/icons/
-"""
-
-    def _generate_main_dart(self, project_name: str = "flutter_app") -> str:
-        """Generate main.dart content with dynamic project name."""
-        class_name = ''.join([word.capitalize() for word in project_name.split('_')])
-        return f"""// main.dart for {project_name}
-import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-
-void main() async {{
-  WidgetsFlutterBinding.ensureInitialized();
-  
-  // Initialize Hive for local storage
-  await Hive.initFlutter();
-  
-  runApp({class_name}App());
-}}
-
-class {class_name}App extends StatelessWidget {{
-  @override
-  Widget build(BuildContext context) {{
-    return MaterialApp(
-      title: '{project_name.replace('_', ' ').title()}',
-      theme: ThemeData(
-        primarySwatch: Colors.deepPurple,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
-      darkTheme: ThemeData.dark().copyWith(
-        primaryColor: Colors.deepPurple,
-      ),
-      home: MusicPlayerHomePage(),
-    );
-  }}
-}}
-
-class MusicPlayerHomePage extends StatelessWidget {{
-  @override
-  Widget build(BuildContext context) {{
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('{project_name.replace('_', ' ').title()}'),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.music_note,
-              size: 100,
-              color: Theme.of(context).primaryColor,
-            ),
-            SizedBox(height: 20),
-            Text(
-              'Music Player Ready!',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            SizedBox(height: 10),
-            Text(
-              'Implementation in progress...',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
-    );
-  }}
-}}
-"""
-
-    def _generate_main_app_dart(self, project_name: str = "flutter_app") -> str:
-        """Generate main app structure dart file."""
-        class_name = ''.join([word.capitalize() for word in project_name.split('_')])
-        return f"""// {project_name}/lib/main_app.dart
-// Main application structure for {project_name}
-
-import 'package:flutter/material.dart';
-
-class {class_name}Core {{
-  static const String appName = '{project_name.replace('_', ' ').title()}';
-  static const String version = '1.0.0';
-  
-  // Music player core functionality will be implemented here
-  // by the implementation agent
-}}
-"""
 
     async def get_system_status(self):
         """Get the current status of the FlutterSwarm system."""
