@@ -354,32 +354,83 @@ class FlutterSwarmCLI:
         return passed == total
 
     async def create_project(self, project_name, project_type="app"):
-        """Create a Flutter project in the flutter_projects directory."""
-        flutter_projects_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flutter_projects")
+        """Create a Flutter project using the agent workflow."""
+        # Determine the flutter_projects directory
+        flutter_projects_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "flutter_projects")
         os.makedirs(flutter_projects_dir, exist_ok=True)
         
-        print(f"📁 Creating Flutter {project_type} '{project_name}' in {flutter_projects_dir}...")
+        print(f"📁 Creating Flutter app '{project_name}' in {flutter_projects_dir}...")
         
         try:
-            # Use asyncio subprocess to run the Flutter command asynchronously
-            process = await asyncio.create_subprocess_exec(
-                "flutter", "create", 
-                f"--{project_type}" if project_type != "app" else "--template=app",
-                os.path.join(flutter_projects_dir, project_name),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            # Analyze the project name to extract features and requirements
+            requirements = self._analyze_task_requirements(project_name)
+            
+            # Get the supervisor directly (since _system_instance should be the supervisor)
+            system = get_system()
+            if not system:
+                print("❌ System not properly initialized")
+                return None
+            
+            supervisor = system  # The system instance is the supervisor itself
+            
+            # Create task context for the project creation
+            from src.models.task_models import TaskContext, TaskType
+            from src.models.langgraph_models import WorkflowState
+            
+            task_context = TaskContext(
+                task_id=f"create_{project_name}",
+                task_type=TaskType.FLUTTER_PROJECT,
+                description=f"Create a Flutter app: {project_name}",
+                requirements=requirements,
+                metadata={
+                    "project_name": project_name,
+                    "project_type": project_type,
+                    "output_dir": flutter_projects_dir
+                }
             )
             
-            stdout, stderr = await process.communicate()
+            # Create initial workflow state as a dictionary
+            initial_state = {
+                "workflow_id": f"create_{project_name}",
+                "task_description": f"Create a Flutter app: {project_name}",
+                "project_context": {
+                    "project_name": project_name,
+                    "project_type": project_type,
+                    "output_dir": flutter_projects_dir,
+                    "requirements": requirements
+                },
+                "messages": [],
+                "available_agents": {},
+                "agent_assignments": {},
+                "pending_tasks": [],
+                "active_tasks": {},
+                "completed_tasks": {},
+                "failed_tasks": {},
+                "deliverables": {},
+                "workflow_metadata": {},
+                "should_continue": True,
+                "execution_metrics": {}
+            }
             
-            if process.returncode == 0:
+            # Run the workflow through the supervisor
+            print("🔄 Running agent workflow to create the Flutter app...")
+            result = await supervisor.graph.ainvoke(
+                initial_state,
+                config={"configurable": {"thread_id": f"create_{project_name}"}}
+            )
+            
+            if result and result.get("final_result") and result["final_result"].get("status") == "completed":
                 print(f"✅ Flutter project '{project_name}' created successfully!")
                 return os.path.join(flutter_projects_dir, project_name)
             else:
-                print(f"❌ Failed to create Flutter project: {stderr.decode()}")
+                error_msg = result.get("error_message", "Unknown error occurred") if result else "Workflow failed"
+                print(f"❌ Failed to create Flutter project: {error_msg}")
                 return None
+                
         except Exception as e:
             print(f"❌ Error creating Flutter project: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
 
