@@ -1613,7 +1613,7 @@ class SupervisorAgent:
         """Invoke the actual agent to process the task."""
         try:
             # Import agents dynamically to avoid circular imports
-            from .implementation_agent_new import ImplementationAgent
+            from .implementation_agent import ImplementationAgent
             from .architecture_agent import ArchitectureAgent
             
             agent = None

@@ -14,7 +14,7 @@ from .core.event_bus import EventBus
 from .agents.base_agent import BaseAgent, AgentConfig
 from .agents.orchestrator_agent import OrchestratorAgent
 from .agents.architecture_agent import ArchitectureAgent
-from .agents.implementation_agent_new import ImplementationAgent
+from .agents.implementation_agent import ImplementationAgent
 from .agents.testing_agent import TestingAgent
 from .agents.devops_agent import DevOpsAgent
 from .agents.security_agent import SecurityAgent
